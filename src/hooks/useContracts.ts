@@ -4,9 +4,11 @@ import { erc20Abi } from 'viem'
 import { BASKET_POOL_ABI, BASKET_ABI, getAddresses, TARGET_CHAIN_ID } from '../contracts'
 import { useRefresh } from '../context/RefreshContext'
 
+// Always resolves addresses from TARGET_CHAIN_ID — never from the wallet's current chain.
+// This means reads always target Arc even when the user is temporarily on another chain
+// (e.g. during a Gateway deposit from Base).
 export function useAddresses() {
-  const { chainId } = useAccount()
-  return getAddresses(chainId ?? TARGET_CHAIN_ID)
+  return getAddresses(TARGET_CHAIN_ID)
 }
 
 export function useTokenBalances() {
@@ -16,14 +18,13 @@ export function useTokenBalances() {
 
   const { data, isLoading, refetch } = useReadContracts({
     contracts: [
-      { address: addrs.USDC,   abi: erc20Abi, functionName: 'balanceOf', args: [address ?? '0x0000000000000000000000000000000000000000'] },
-      { address: addrs.EURC,   abi: erc20Abi, functionName: 'balanceOf', args: [address ?? '0x0000000000000000000000000000000000000000'] },
-      { address: addrs.CIRBTC, abi: erc20Abi, functionName: 'balanceOf', args: [address ?? '0x0000000000000000000000000000000000000000'] },
+      { address: addrs.USDC,   abi: erc20Abi, functionName: 'balanceOf', args: [address ?? '0x0000000000000000000000000000000000000000'], chainId: TARGET_CHAIN_ID },
+      { address: addrs.EURC,   abi: erc20Abi, functionName: 'balanceOf', args: [address ?? '0x0000000000000000000000000000000000000000'], chainId: TARGET_CHAIN_ID },
+      { address: addrs.CIRBTC, abi: erc20Abi, functionName: 'balanceOf', args: [address ?? '0x0000000000000000000000000000000000000000'], chainId: TARGET_CHAIN_ID },
     ],
     query: { enabled: !!address, refetchInterval: 8000 },
   })
 
-  // Re-fetch whenever a transaction completes anywhere in the app
   useEffect(() => {
     if (refreshKey > 0) void refetch()
   }, [refreshKey, refetch])
@@ -42,6 +43,7 @@ export function usePoolReserves(poolAddress: `0x${string}`) {
     address: poolAddress,
     abi: BASKET_POOL_ABI,
     functionName: 'getReserves',
+    chainId: TARGET_CHAIN_ID,
     query: { refetchInterval: 8000 },
   })
   const [r0, r1] = (data ?? [0n, 0n]) as [bigint, bigint]
@@ -58,6 +60,7 @@ export function useBasketPosition() {
     abi: BASKET_ABI,
     functionName: 'getBasketValue',
     args: [address ?? '0x0000000000000000000000000000000000000000'],
+    chainId: TARGET_CHAIN_ID,
     query: { enabled: !!address, refetchInterval: 8000 },
   })
 
@@ -77,6 +80,7 @@ export function useBasketAllocation() {
     abi: BASKET_ABI,
     functionName: 'getAllocation',
     args: [address ?? '0x0000000000000000000000000000000000000000'],
+    chainId: TARGET_CHAIN_ID,
     query: { enabled: !!address, refetchInterval: 15000 },
   })
   const [usdcBps, eurcBps, btcBps] = (data ?? [4000n, 3000n, 3000n]) as [bigint, bigint, bigint]
@@ -90,6 +94,7 @@ export function usePoolLpBalance(poolAddress: `0x${string}`) {
     abi: BASKET_POOL_ABI,
     functionName: 'balanceOf',
     args: [address ?? '0x0000000000000000000000000000000000000000'],
+    chainId: TARGET_CHAIN_ID,
     query: { enabled: !!address, refetchInterval: 8000 },
   })
   return { lpBalance: (data ?? 0n) as bigint, isLoading, refetch }
@@ -100,6 +105,7 @@ export function usePoolTotalSupply(poolAddress: `0x${string}`) {
     address: poolAddress,
     abi: BASKET_POOL_ABI,
     functionName: 'totalSupply',
+    chainId: TARGET_CHAIN_ID,
     query: { refetchInterval: 8000 },
   })
   return (data ?? 0n) as bigint

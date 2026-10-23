@@ -16,6 +16,7 @@ import { useTokenBalances } from '../hooks/useContracts'
 import { useRefresh } from '../context/RefreshContext'
 import { formatUnits, parseUnitsStrict } from '../utils/format'
 import { buildTxExplorerUrl } from '@/onchain-facts'
+import { saveActivity } from '../hooks/useActivity'
 
 const glass = {
   card:  { background: 'rgba(255,255,255,0.07)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '24px' },
@@ -80,16 +81,16 @@ function StreamCard({ stream, onAction }: { stream: Stream; onAction: () => void
   const { chainId, address } = useAccount()
   const { switchChain } = useSwitchChain()
   const { triggerRefresh } = useRefresh()
-  const addrs = getAddresses(chainId ?? TARGET_CHAIN_ID)
+  const addrs = getAddresses(TARGET_CHAIN_ID)
   const wrongChain = !!(chainId && chainId !== TARGET_CHAIN_ID)
 
   const [action, setAction] = useState<'idle' | 'moving' | 'stopping'>('idle')
   const [err, setErr]       = useState('')
   const [txHash, setTxHash] = useState<`0x${string}` | undefined>()
 
-  const publicClient = usePublicClient()
+  const publicClient = usePublicClient({ chainId: TARGET_CHAIN_ID })
   const { writeContract, isPending } = useWriteContract()
-  const { isSuccess, isLoading: confirming } = useWaitForTransactionReceipt({ hash: txHash })
+  const { isSuccess, isLoading: confirming } = useWaitForTransactionReceipt({ hash: txHash, chainId: TARGET_CHAIN_ID })
 
   // Deferred effect — avoids set-state-in-effect lint
   const actionRef = useRef(action)
@@ -98,7 +99,19 @@ function StreamCard({ stream, onAction }: { stream: Stream; onAction: () => void
   useEffect(() => {
     if (!isSuccess) return
     const t = setTimeout(() => {
-      toast.success(actionRef.current === 'moving' ? 'Moved to basket!' : 'Stream stopped!')
+      const isMoving = actionRef.current === 'moving'
+      toast.success(isMoving ? 'Moved to basket!' : 'Stream stopped!')
+      if (address && txHash) {
+        saveActivity(address, {
+          id: `${txHash}-${isMoving ? 'MoveToBasket' : 'StopStream'}`,
+          type: isMoving ? 'Move to Basket' : 'Stop Stream',
+          desc: isMoving
+            ? `Moved unlocked USDC from stream #${stream.id.toString()} to basket`
+            : `Stopped stream #${stream.id.toString()}`,
+          txHash,
+          timestamp: Date.now(),
+        })
+      }
       setAction('idle')
       setErr('')
       triggerRefresh()
@@ -115,50 +128,56 @@ function StreamCard({ stream, onAction }: { stream: Stream; onAction: () => void
   const pct         = Math.min(100, duration > 0 ? (elapsed / duration) * 100 : 100)
 
   const handleMove = useCallback(async () => {
+    if (wrongChain) { switchChain({ chainId: TARGET_CHAIN_ID }); return }
     if (!address || !publicClient) return
     setErr('')
     setAction('moving')
-    const gas = await estimateGas(publicClient, {
-      address: addrs.STREAM,
-      abi: BASKET_STREAM_ABI,
-      functionName: 'moveToBasket',
-      args: [stream.id, 0n, 0n],
-      account: address,
-    })
-    writeContract({
-      address: addrs.STREAM,
-      abi: BASKET_STREAM_ABI,
-      functionName: 'moveToBasket',
-      args: [stream.id, 0n, 0n],
-      gas,
-    }, {
-      onSuccess: (hash) => setTxHash(hash),
-      onError:   (e)    => { setErr(e.message.split('\n')[0]); setAction('idle') },
-    })
-  }, [address, addrs.STREAM, stream.id, writeContract, publicClient])
+    try {
+      const gas = await estimateGas(publicClient, {
+        address: addrs.STREAM,
+        abi: BASKET_STREAM_ABI,
+        functionName: 'moveToBasket',
+        args: [stream.id, 0n, 0n],
+        account: address,
+      })
+      writeContract({
+        address: addrs.STREAM,
+        abi: BASKET_STREAM_ABI,
+        functionName: 'moveToBasket',
+        args: [stream.id, 0n, 0n],
+        gas,
+      }, {
+        onSuccess: (hash) => setTxHash(hash),
+        onError:   (e)    => { setErr(e.message.split('\n')[0]); setAction('idle') },
+      })
+    } catch (e) { setErr((e as Error).message.split('\n')[0]); setAction('idle') }
+  }, [address, addrs.STREAM, stream.id, writeContract, publicClient, wrongChain, switchChain])
 
   const handleStop = useCallback(async () => {
+    if (wrongChain) { switchChain({ chainId: TARGET_CHAIN_ID }); return }
     if (!address || !publicClient) return
     setErr('')
     setAction('stopping')
-    const gas = await estimateGas(publicClient, {
-      address: addrs.STREAM,
-      abi: BASKET_STREAM_ABI,
-      functionName: 'stopStream',
-      args: [stream.id, 0n, 0n],
-      account: address,
-    })
-    writeContract({
-      address: addrs.STREAM,
-      abi: BASKET_STREAM_ABI,
-      functionName: 'stopStream',
-      args: [stream.id, 0n, 0n],
-      gas,
-    }, {
-      onSuccess: (hash) => setTxHash(hash),
-      onError:   (e)    => { setErr(e.message.split('\n')[0]); setAction('idle') },
-    })
-  }, [address, addrs.STREAM, stream.id, writeContract, publicClient])
+    try {
+      const gas = await estimateGas(publicClient, {
+        address: addrs.STREAM,
+        abi: BASKET_STREAM_ABI,
+        functionName: 'stopStream',
+        args: [stream.id, 0n, 0n],
+        account: address,
+      })
+      writeContract({
+        address: addrs.STREAM,
+        abi: BASKET_STREAM_ABI,
+        functionName: 'stopStream',
+        args: [stream.id, 0n, 0n],
+        gas,
+      }, {
+        onSuccess: (hash) => setTxHash(hash),
+        onError:   (e)    => { setErr(e.message.split('\n')[0]); setAction('idle') },
+      })
+    } catch (e) { setErr((e as Error).message.split('\n')[0]); setAction('idle') }
+  }, [address, addrs.STREAM, stream.id, writeContract, publicClient, wrongChain, switchChain])
 
   const busy = isPending || confirming
 
@@ -277,8 +296,8 @@ function StreamCard({ stream, onAction }: { stream: Stream; onAction: () => void
 export function StreamTab() {
   const { address, chainId, isConnected } = useAccount()
   const { switchChain } = useSwitchChain()
-  const publicClient = usePublicClient()
-  const addrs      = getAddresses(chainId ?? TARGET_CHAIN_ID)
+  const publicClient = usePublicClient({ chainId: TARGET_CHAIN_ID })
+  const addrs      = getAddresses(TARGET_CHAIN_ID)
   const wrongChain = isConnected && chainId !== TARGET_CHAIN_ID
   const { triggerRefresh } = useRefresh()
   const { usdc: usdcBal } = useTokenBalances()
@@ -296,8 +315,8 @@ export function StreamTab() {
 
   const { writeContract: approveFn, isPending: approvePending, reset: resetApprove } = useWriteContract()
   const { writeContract: startFn,   isPending: startPending,   reset: resetStart   } = useWriteContract()
-  const { isSuccess: approveOk, isLoading: approveConf } = useWaitForTransactionReceipt({ hash: startStep === 'approve' ? startTxHash : undefined })
-  const { isSuccess: startOk,   isLoading: startConf   } = useWaitForTransactionReceipt({ hash: startStep === 'start'   ? startTxHash : undefined })
+  const { isSuccess: approveOk, isLoading: approveConf } = useWaitForTransactionReceipt({ hash: startStep === 'approve' ? startTxHash : undefined, chainId: TARGET_CHAIN_ID })
+  const { isSuccess: startOk,   isLoading: startConf   } = useWaitForTransactionReceipt({ hash: startStep === 'start'   ? startTxHash : undefined, chainId: TARGET_CHAIN_ID })
 
   const amountBigInt = parseUnitsStrict(amount, 6)
   const busyStart    = startStep === 'approve' || startStep === 'start'
@@ -343,6 +362,17 @@ export function StreamTab() {
     const t = setTimeout(() => {
       setStartStep('done')
       toast.success('Stream started!')
+      if (address && startTxHash) {
+        const dur = durationRef.current
+        const dLabel = dur >= 2592000 ? '30d' : dur >= 604800 ? '7d' : dur >= 86400 ? '1d' : '1h'
+        saveActivity(address, {
+          id: `${startTxHash}-StreamStarted`,
+          type: 'Stream',
+          desc: `Started ${formatUnits(amountRef.current, 6, 2)} USDC stream over ${dLabel}`,
+          txHash: startTxHash,
+          timestamp: Date.now(),
+        })
+      }
       setAmount('')
       triggerRefresh()
       void loadStreamsRef.current?.()
@@ -351,6 +381,7 @@ export function StreamTab() {
   }, [startOk]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleStart = () => {
+    if (wrongChain) { switchChain({ chainId: TARGET_CHAIN_ID }); return }
     if (!address || amountBigInt === 0n) return
     setStartErr('')
     setStartStep('idle')
@@ -358,23 +389,27 @@ export function StreamTab() {
     setStartTxHash(undefined)
     setStartStep('approve')
     void (async () => {
-      const gas = publicClient ? await estimateGas(publicClient, {
-        address: addrs.USDC,
-        abi: erc20Abi,
-        functionName: 'approve',
-        args: [addrs.STREAM, amountBigInt],
-        account: address,
-      }) : GAS_FALLBACK.approve
-      approveFn({
-        address: addrs.USDC,
-        abi: erc20Abi,
-        functionName: 'approve',
-        args: [addrs.STREAM as `0x${string}`, amountBigInt],
-        gas,
-      }, {
-        onSuccess: (hash) => setStartTxHash(hash),
-        onError:   (e)    => { setStartErr(e.message.split('\n')[0]); setStartStep('idle') },
-      })
+      try {
+        const gas = publicClient ? await estimateGas(publicClient, {
+          address: addrs.USDC,
+          abi: erc20Abi,
+          functionName: 'approve',
+          args: [addrs.STREAM, amountBigInt],
+          account: address,
+        }) : GAS_FALLBACK.approve
+        approveFn({
+          address: addrs.USDC,
+          abi: erc20Abi,
+          functionName: 'approve',
+          args: [addrs.STREAM as `0x${string}`, amountBigInt],
+          gas,
+        }, {
+          onSuccess: (hash) => setStartTxHash(hash),
+          onError:   (e)    => { setStartErr(e.message.split('\n')[0]); setStartStep('idle') },
+        })
+      } catch (e) {
+        setStartErr((e as Error).message.split('\n')[0]); setStartStep('idle')
+      }
     })()
   }
 

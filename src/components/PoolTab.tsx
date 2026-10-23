@@ -2,13 +2,15 @@ import { useState, useEffect, useCallback } from 'react'
 import { useAccount, useWriteContract, useWaitForTransactionReceipt, useSwitchChain, usePublicClient } from 'wagmi'
 import { erc20Abi } from 'viem'
 import { toast } from 'sonner'
-import { Loader2, ExternalLink, Droplets, AlertCircle, CheckCircle2 } from 'lucide-react'
-import { BASKET_POOL_ABI, getAddresses, TARGET_CHAIN_ID, TOKEN_META, GAS_FALLBACK } from '../contracts'
+import { Loader2, ExternalLink, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { BASKET_POOL_ABI, getAddresses, TARGET_CHAIN_ID, GAS_FALLBACK } from '../contracts'
+import { TokenLogo } from './TokenLogo'
 import { estimateGas } from '../estimateGas'
 import { usePoolReserves, useTokenBalances, usePoolLpBalance, usePoolTotalSupply } from '../hooks/useContracts'
 import { useRefresh } from '../context/RefreshContext'
 import { formatUnits, parseUnitsStrict, formatUsd, slippageFactor, deadline } from '../utils/format'
 import { buildTxExplorerUrl } from '@/onchain-facts'
+import { saveActivity } from '../hooks/useActivity'
 
 const glass = {
   card: { background: 'rgba(255,255,255,0.07)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '24px' },
@@ -19,9 +21,9 @@ type Pool = 'eurc' | 'btc'
 type AddStep = 'idle' | 'approveUsdc' | 'approveToken1' | 'addLiq' | 'done'
 type RemoveStep = 'idle' | 'approveLp' | 'removeLiq' | 'done'
 
-const POOL_INFO: Record<Pool, { label: string; token1: string; token1Dec: number; color: string }> = {
-  eurc: { label: 'USDC / EURC',   token1: 'EURC',   token1Dec: 6, color: TOKEN_META.EURC.color },
-  btc:  { label: 'USDC / cirBTC', token1: 'cirBTC', token1Dec: 8, color: TOKEN_META.CIRBTC.color },
+const POOL_INFO: Record<Pool, { label: string; token1: string; token1Dec: number; token1Key: 'EURC' | 'CIRBTC' }> = {
+  eurc: { label: 'USDC / EURC',   token1: 'EURC',   token1Dec: 6, token1Key: 'EURC'   },
+  btc:  { label: 'USDC / cirBTC', token1: 'cirBTC', token1Dec: 8, token1Key: 'CIRBTC' },
 }
 
 const STEP_LABELS: Record<AddStep, string> = {
@@ -43,9 +45,8 @@ function PoolCard({ pool }: { pool: Pool }) {
   const { chainId, isConnected, address: userAddr } = useAccount()
   const { triggerRefresh } = useRefresh()
   const { switchChain } = useSwitchChain()
-  const publicClient = usePublicClient()
-  const chainIdResolved = chainId ?? TARGET_CHAIN_ID
-  const addrs = getAddresses(chainIdResolved)
+  const publicClient = usePublicClient({ chainId: TARGET_CHAIN_ID })
+  const addrs = getAddresses(TARGET_CHAIN_ID)
   const wrongChain = isConnected && chainId !== TARGET_CHAIN_ID
   const poolAddr = pool === 'eurc' ? addrs.POOL_USDC_EURC : addrs.POOL_USDC_BTC
   const token1Addr = pool === 'eurc' ? addrs.EURC : addrs.CIRBTC
@@ -126,9 +127,9 @@ function PoolCard({ pool }: { pool: Pool }) {
     reset: resetAddLiq,
   } = useWriteContract()
 
-  const { isLoading: approveUsdcConf, isSuccess: approveUsdcOk } = useWaitForTransactionReceipt({ hash: approveUsdcHash })
-  const { isLoading: approveT1Conf, isSuccess: approveT1Ok } = useWaitForTransactionReceipt({ hash: approveT1Hash })
-  const { isLoading: addConf, isSuccess: addOk } = useWaitForTransactionReceipt({ hash: addHash })
+  const { isLoading: approveUsdcConf, isSuccess: approveUsdcOk } = useWaitForTransactionReceipt({ hash: approveUsdcHash, chainId: TARGET_CHAIN_ID })
+  const { isLoading: approveT1Conf, isSuccess: approveT1Ok } = useWaitForTransactionReceipt({ hash: approveT1Hash, chainId: TARGET_CHAIN_ID })
+  const { isLoading: addConf, isSuccess: addOk } = useWaitForTransactionReceipt({ hash: addHash, chainId: TARGET_CHAIN_ID })
 
   // Capture write errors for the user
   useEffect(() => {
@@ -180,6 +181,15 @@ function PoolCard({ pool }: { pool: Pool }) {
       void refetchLp()
       triggerRefresh()
       toast.success('Liquidity added!', { id: 'addliq' + pool })
+      if (userAddr && addHash) {
+        saveActivity(userAddr, {
+          id: `${addHash}-AddLiquidity`,
+          type: 'Add Liquidity',
+          desc: `Added ${formatUnits(pendingUsdc, 6, 2)} USDC + ${formatUnits(pendingT1, info.token1Dec, info.token1Dec)} ${info.token1} to ${info.label} pool`,
+          txHash: addHash,
+          timestamp: Date.now(),
+        })
+      }
       setUsdcAmt('')
       setTokenAmt('')
       setTimeout(() => setAddStep('idle'), 2000)
@@ -188,6 +198,7 @@ function PoolCard({ pool }: { pool: Pool }) {
   }, [addOk, addStep])
 
   const handleAdd = useCallback(() => {
+    if (wrongChain) { switchChain({ chainId: TARGET_CHAIN_ID }); return }
     const u = parseUnitsStrict(usdcAmt, 6)
     const t = parseUnitsStrict(tokenAmt, info.token1Dec)
     if (u === 0n || t === 0n) return
@@ -200,12 +211,17 @@ function PoolCard({ pool }: { pool: Pool }) {
     setAddStep('approveUsdc')
     toast.info('Step 1/3: Approve USDC', { id: 'addliq' + pool })
     void (async () => {
-      const gas = publicClient && userAddr ? await estimateGas(publicClient, {
-        address: addrs.USDC, abi: erc20Abi, functionName: 'approve', args: [poolAddr, u], account: userAddr,
-      }) : GAS_FALLBACK.approve
-      approveUsdcFn({ address: addrs.USDC, abi: erc20Abi, functionName: 'approve', args: [poolAddr, u], gas })
+      try {
+        const gas = publicClient && userAddr ? await estimateGas(publicClient, {
+          address: addrs.USDC, abi: erc20Abi, functionName: 'approve', args: [poolAddr, u], account: userAddr,
+        }) : GAS_FALLBACK.approve
+        approveUsdcFn({ address: addrs.USDC, abi: erc20Abi, functionName: 'approve', args: [poolAddr, u], gas })
+      } catch (e) {
+        const msg = (e as { shortMessage?: string }).shortMessage ?? (e as Error).message ?? 'Gas estimation failed'
+        setAddError(msg); setAddStep('idle'); toast.error(msg, { id: 'addliq' + pool })
+      }
     })()
-  }, [usdcAmt, tokenAmt, info.token1Dec, addrs.USDC, poolAddr, pool, approveUsdcFn, resetApproveUsdc, resetApproveT1, resetAddLiq, publicClient, userAddr])
+  }, [usdcAmt, tokenAmt, info.token1Dec, addrs.USDC, poolAddr, pool, approveUsdcFn, resetApproveUsdc, resetApproveT1, resetAddLiq, publicClient, userAddr, wrongChain, switchChain])
 
   // ── Remove liquidity state machine ───────────────────────────────────────
 
@@ -228,8 +244,8 @@ function PoolCard({ pool }: { pool: Pool }) {
     reset: resetRemoveLiq,
   } = useWriteContract()
 
-  const { isLoading: approveLpConf, isSuccess: approveLpOk } = useWaitForTransactionReceipt({ hash: approveLpHash })
-  const { isLoading: removeConf, isSuccess: removeOk } = useWaitForTransactionReceipt({ hash: removeHash })
+  const { isLoading: approveLpConf, isSuccess: approveLpOk } = useWaitForTransactionReceipt({ hash: approveLpHash, chainId: TARGET_CHAIN_ID })
+  const { isLoading: removeConf, isSuccess: removeOk } = useWaitForTransactionReceipt({ hash: removeHash, chainId: TARGET_CHAIN_ID })
 
   useEffect(() => {
     const err = approveLpError ?? removeLiqError
@@ -265,6 +281,15 @@ function PoolCard({ pool }: { pool: Pool }) {
       void refetchLp()
       triggerRefresh()
       toast.success('Liquidity removed!', { id: 'remliq' + pool })
+      if (userAddr && removeHash) {
+        saveActivity(userAddr, {
+          id: `${removeHash}-RemoveLiquidity`,
+          type: 'Remove Liquidity',
+          desc: `Removed ${formatUnits(pendingLp, 18, 4)} LP from ${info.label} pool`,
+          txHash: removeHash,
+          timestamp: Date.now(),
+        })
+      }
       setLpAmt('')
       setTimeout(() => setRemoveStep('idle'), 2000)
     }
@@ -272,6 +297,7 @@ function PoolCard({ pool }: { pool: Pool }) {
   }, [removeOk, removeStep])
 
   const handleRemove = useCallback(() => {
+    if (wrongChain) { switchChain({ chainId: TARGET_CHAIN_ID }); return }
     const lp = parseUnitsStrict(lpAmt, 18)
     if (lp === 0n) return
     setRemoveError(null)
@@ -281,12 +307,17 @@ function PoolCard({ pool }: { pool: Pool }) {
     setRemoveStep('approveLp')
     toast.info('Step 1/2: Approve LP token', { id: 'remliq' + pool })
     void (async () => {
-      const gas = publicClient && userAddr ? await estimateGas(publicClient, {
-        address: poolAddr, abi: erc20Abi, functionName: 'approve', args: [poolAddr, lp], account: userAddr,
-      }) : GAS_FALLBACK.approve
-      approveLpFn({ address: poolAddr, abi: erc20Abi, functionName: 'approve', args: [poolAddr, lp], gas })
+      try {
+        const gas = publicClient && userAddr ? await estimateGas(publicClient, {
+          address: poolAddr, abi: erc20Abi, functionName: 'approve', args: [poolAddr, lp], account: userAddr,
+        }) : GAS_FALLBACK.approve
+        approveLpFn({ address: poolAddr, abi: erc20Abi, functionName: 'approve', args: [poolAddr, lp], gas })
+      } catch (e) {
+        const msg = (e as { shortMessage?: string }).shortMessage ?? (e as Error).message ?? 'Gas estimation failed'
+        setRemoveError(msg); setRemoveStep('idle'); toast.error(msg, { id: 'remliq' + pool })
+      }
     })()
-  }, [lpAmt, poolAddr, pool, approveLpFn, resetApproveLp, resetRemoveLiq, publicClient, userAddr])
+  }, [lpAmt, poolAddr, pool, approveLpFn, resetApproveLp, resetRemoveLiq, publicClient, userAddr, wrongChain, switchChain])
 
   // ── Derived busy states ───────────────────────────────────────────────────
 
@@ -301,8 +332,9 @@ function PoolCard({ pool }: { pool: Pool }) {
     <div style={glass.card} className="p-5">
       {/* Header */}
       <div className="flex items-center gap-3 mb-4">
-        <div className="size-8 rounded-xl flex items-center justify-center" style={{ background: `${info.color}22` }}>
-          <Droplets className="size-4" style={{ color: info.color }} />
+        <div className="flex items-center">
+          <TokenLogo token="USDC" size={28} />
+          <TokenLogo token={info.token1Key} size={28} className="-ml-2" />
         </div>
         <div>
           <div className="text-sm font-bold" style={{ color: 'var(--ink)' }}>{info.label}</div>
@@ -325,11 +357,15 @@ function PoolCard({ pool }: { pool: Pool }) {
       {/* Reserves */}
       <div className="grid grid-cols-2 gap-2 mb-4">
         <div style={glass.inner} className="p-3">
-          <div className="text-xs" style={{ color: 'var(--subtle)' }}>USDC Reserve</div>
+          <div className="flex items-center gap-1 text-xs mb-1" style={{ color: 'var(--subtle)' }}>
+            <TokenLogo token="USDC" size={12} />USDC Reserve
+          </div>
           <div className="display text-sm font-bold tabular-nums mt-1" style={{ color: 'var(--ink)' }}>{formatUsd(reserve0)}</div>
         </div>
         <div style={glass.inner} className="p-3">
-          <div className="text-xs" style={{ color: 'var(--subtle)' }}>{info.token1} Reserve</div>
+          <div className="flex items-center gap-1 text-xs mb-1" style={{ color: 'var(--subtle)' }}>
+            <TokenLogo token={info.token1Key} size={12} />{info.token1} Reserve
+          </div>
           <div className="display text-sm font-bold tabular-nums mt-1" style={{ color: 'var(--ink)' }}>{formatUnits(reserve1, info.token1Dec, 6)}</div>
         </div>
       </div>
@@ -369,7 +405,7 @@ function PoolCard({ pool }: { pool: Pool }) {
           <div style={glass.inner} className="p-3">
             <div className="flex justify-between text-xs mb-1.5" style={{ color: 'var(--subtle)' }}>
               <span>{info.token1}</span>
-              <span className="tabular-nums">{token1Bal ? formatUnits(token1Bal, info.token1Dec, 4) : '—'}</span>
+              <span className="tabular-nums">{token1Bal ? formatUnits(token1Bal, info.token1Dec, info.token1Dec) : '—'}</span>
             </div>
             <input inputMode="decimal" value={tokenAmt}
               onChange={(e) => { const v = e.target.value.replace(/[^0-9.]/g, ''); if (v === '' || /^\d*\.?\d*$/.test(v)) setTokenAmt(v) }}

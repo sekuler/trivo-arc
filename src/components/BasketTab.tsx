@@ -3,13 +3,15 @@ import { useAccount, useWriteContract, useWaitForTransactionReceipt, useSwitchCh
 import { erc20Abi } from 'viem'
 import { toast } from 'sonner'
 import { Loader2, ChevronDown, ExternalLink, AlertCircle, CheckCircle2 } from 'lucide-react'
-import { BASKET_ABI, getAddresses, TARGET_CHAIN_ID, TARGET_CHAIN, TOKEN_META, GAS_FALLBACK } from '../contracts'
+import { BASKET_ABI, getAddresses, TARGET_CHAIN_ID, TARGET_CHAIN, GAS_FALLBACK } from '../contracts'
+import { TokenLogo } from './TokenLogo'
 import { estimateGas } from '../estimateGas'
 import { GatewaySection } from './GatewaySection'
 import { useBasketPosition, useBasketAllocation, useTokenBalances, usePoolReserves } from '../hooks/useContracts'
 import { useRefresh } from '../context/RefreshContext'
-import { formatUnits, parseUnitsStrict, formatUsd, slippageFactor } from '../utils/format'
+import { formatUnits, parseUnitsStrict, formatUsd, slippageFactor, calcPriceImpactBps } from '../utils/format'
 import { buildTxExplorerUrl } from '@/onchain-facts'
+import { saveActivity } from '../hooks/useActivity'
 
 const glass = {
   card:  { background: 'rgba(255,255,255,0.07)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '24px' },
@@ -34,8 +36,8 @@ function ammQuote(amountIn: bigint, reserveIn: bigint, reserveOut: bigint): bigi
 export function BasketTab() {
   const { chainId, isConnected, address } = useAccount()
   const { switchChain } = useSwitchChain()
-  const publicClient = usePublicClient()
-  const addrs    = getAddresses(chainId ?? TARGET_CHAIN_ID)
+  const publicClient = usePublicClient({ chainId: TARGET_CHAIN_ID })
+  const addrs    = getAddresses(TARGET_CHAIN_ID)
   const wrongChain = isConnected && chainId !== TARGET_CHAIN_ID
   const { triggerRefresh } = useRefresh()
 
@@ -70,10 +72,10 @@ export function BasketTab() {
   const { writeContract: withdrawFn, data: withdrawHash, isPending: withdrawPending, error: withdrawErr               } = useWriteContract()
   const { writeContract: allocFn,    data: allocHash,    isPending: allocPending                                       } = useWriteContract()
 
-  const { isLoading: approveConf, isSuccess: approveOk }  = useWaitForTransactionReceipt({ hash: approveHash })
-  const { isLoading: depositConf, isSuccess: depositOk }  = useWaitForTransactionReceipt({ hash: depositHash })
-  const { isLoading: withdrawConf, isSuccess: withdrawOk } = useWaitForTransactionReceipt({ hash: withdrawHash })
-  const { isSuccess: allocOk }                             = useWaitForTransactionReceipt({ hash: allocHash })
+  const { isLoading: approveConf, isSuccess: approveOk }  = useWaitForTransactionReceipt({ hash: approveHash,  chainId: TARGET_CHAIN_ID })
+  const { isLoading: depositConf, isSuccess: depositOk }  = useWaitForTransactionReceipt({ hash: depositHash,  chainId: TARGET_CHAIN_ID })
+  const { isLoading: withdrawConf, isSuccess: withdrawOk } = useWaitForTransactionReceipt({ hash: withdrawHash, chainId: TARGET_CHAIN_ID })
+  const { isSuccess: allocOk }                             = useWaitForTransactionReceipt({ hash: allocHash,    chainId: TARGET_CHAIN_ID })
 
   // ── Quoted preview (USDC deposit only) ───────────────────────────────────
   const previewAmt   = parseUnitsStrict(depositAmt || '0', 6)
@@ -85,6 +87,12 @@ export function BasketTab() {
   const quotedBtc    = ammQuote(usdcForBtc,  btcR0,  btcR1)
   const minEurc      = slip(quotedEurc)
   const minBtc       = slip(quotedBtc)
+
+  // Price impact for deposit (weighted: eurc leg + btc leg, each relative to its own swap)
+  const depositImpactBps = previewAmt > 0n ? Math.round(
+    (eurcBps > 0 ? calcPriceImpactBps(usdcForEurc, eurcR0, eurcR1) * eurcBps : 0) / 10000 +
+    (btcBps  > 0 ? calcPriceImpactBps(usdcForBtc,  btcR0,  btcR1)  * btcBps  : 0) / 10000
+  ) : 0
 
   // ── Withdraw share derived from USDC amount input or quick % buttons ────────
   // If the user typed a USDC amount, convert it to a bps share of totalValue.
@@ -109,6 +117,12 @@ export function BasketTab() {
   const expectedUsdcFromBtc  = ammQuote(wBtcShare,  btcR1,  btcR0)
   const expectedTotalUsdc    = wUsdcShare + expectedUsdcFromEurc + expectedUsdcFromBtc
   const minWithdrawUsdc      = slip(expectedTotalUsdc)
+
+  // Price impact for withdraw-as-USDC (weighted by each leg's value share)
+  const withdrawImpactBps = expectedTotalUsdc > 0n ? Math.round(
+    (wEurcShare > 0n ? calcPriceImpactBps(wEurcShare, eurcR1, eurcR0) * Number(expectedUsdcFromEurc) : 0) / Number(expectedTotalUsdc || 1n) +
+    (wBtcShare  > 0n ? calcPriceImpactBps(wBtcShare,  btcR1,  btcR0)  * Number(expectedUsdcFromBtc)  : 0) / Number(expectedTotalUsdc || 1n)
+  ) : 0
 
   // Pool state
   const eurcPoolOk = eurcR0 > 0n && eurcR1 > 0n
@@ -166,6 +180,15 @@ export function BasketTab() {
       void refetchPos()
       triggerRefresh()
       toast.success('Deposit confirmed!', { id: 'deposit' })
+      if (address && depositHash) {
+        saveActivity(address, {
+          id: `${depositHash}-Deposit`,
+          type: 'Deposit',
+          desc: `Deposited ${formatUnits(pendingAmt, 6, 2)} USDC to basket`,
+          txHash: depositHash,
+          timestamp: Date.now(),
+        })
+      }
       setDepositAmt('')
       setTimeout(() => setDepositStep('idle'), 3000)
     }
@@ -186,6 +209,15 @@ export function BasketTab() {
       triggerRefresh()
       setWithdrawError(null)
       toast.success('Withdrawal confirmed!', { id: 'withdraw' })
+      if (address && withdrawHash) {
+        saveActivity(address, {
+          id: `${withdrawHash}-Withdraw`,
+          type: 'Withdraw',
+          desc: `Withdrew ${(activeBps / 100).toFixed(activeBps % 100 === 0 ? 0 : 2)}% from basket${withdrawMode === 'usdc' ? ' as USDC' : ' as tokens'}`,
+          txHash: withdrawHash,
+          timestamp: Date.now(),
+        })
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [withdrawOk])
@@ -201,6 +233,7 @@ export function BasketTab() {
 
   // ── Handlers ──────────────────────────────────────────────────────────────
   const handleDeposit = () => {
+    if (wrongChain) { switchChain({ chainId: TARGET_CHAIN_ID }); return }
     if (!depositAmt) return
     const amount = parseUnitsStrict(depositAmt, 6)
     if (amount === 0n) return
@@ -248,25 +281,31 @@ export function BasketTab() {
   }
 
   const handleWithdraw = () => {
+    if (wrongChain) { switchChain({ chainId: TARGET_CHAIN_ID }); return }
     setWithdrawError(null)
     const isPartial = activeBps < 10000
     void (async () => {
-      if (withdrawMode === 'usdc') {
-        const fn = isPartial ? 'withdrawPartial' : 'withdrawAll'
-        const args = isPartial ? [activeBps, minWithdrawUsdc] : [minWithdrawUsdc]
-        const gas = publicClient && address ? await estimateGas(publicClient, {
-          address: addrs.BASKET, abi: BASKET_ABI, functionName: fn, args, account: address,
-        }) : GAS_FALLBACK.withdraw
-        withdrawFn({ address: addrs.BASKET, abi: BASKET_ABI, functionName: fn, args, gas })
-      } else {
-        const fn = isPartial ? 'withdrawPartialTokens' : 'withdrawTokens'
-        const args = isPartial ? [activeBps] : []
-        const gas = publicClient && address ? await estimateGas(publicClient, {
-          address: addrs.BASKET, abi: BASKET_ABI, functionName: fn, args, account: address,
-        }) : GAS_FALLBACK.withdrawPartial
-        withdrawFn({ address: addrs.BASKET, abi: BASKET_ABI, functionName: fn, args, gas })
+      try {
+        if (withdrawMode === 'usdc') {
+          const fn = isPartial ? 'withdrawPartial' : 'withdrawAll'
+          const args = isPartial ? [activeBps, minWithdrawUsdc] : [minWithdrawUsdc]
+          const gas = publicClient && address ? await estimateGas(publicClient, {
+            address: addrs.BASKET, abi: BASKET_ABI, functionName: fn, args, account: address,
+          }) : GAS_FALLBACK.withdraw
+          withdrawFn({ address: addrs.BASKET, abi: BASKET_ABI, functionName: fn, args, gas })
+        } else {
+          const fn = isPartial ? 'withdrawPartialTokens' : 'withdrawTokens'
+          const args = isPartial ? [activeBps] : []
+          const gas = publicClient && address ? await estimateGas(publicClient, {
+            address: addrs.BASKET, abi: BASKET_ABI, functionName: fn, args, account: address,
+          }) : GAS_FALLBACK.withdrawPartial
+          withdrawFn({ address: addrs.BASKET, abi: BASKET_ABI, functionName: fn, args, gas })
+        }
+        toast.info('Confirm withdrawal in your wallet', { id: 'withdraw' })
+      } catch (e) {
+        const msg = (e as { shortMessage?: string }).shortMessage ?? (e as Error).message ?? 'Gas estimation failed'
+        setWithdrawError(msg); toast.error(msg.slice(0, 80), { id: 'withdraw' })
       }
-      toast.info('Confirm withdrawal in your wallet', { id: 'withdraw' })
     })()
   }
 
@@ -283,7 +322,7 @@ export function BasketTab() {
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="grid gap-4" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,380px)', alignItems: 'start' }}>
+    <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,360px)]" style={{ alignItems: 'start' }}>
 
       {/* ── Left column: holdings + deposit + withdraw ── */}
       <div className="space-y-4">
@@ -309,19 +348,19 @@ export function BasketTab() {
         {/* Per-token rows */}
         <div className="space-y-2">
           {([
-            { label: 'USDC',   value: usdcHeld, dec: 6, digits: 2, bps: usdcBps, color: TOKEN_META.USDC.color },
-            { label: 'EURC',   value: eurcHeld, dec: 6, digits: 2, bps: eurcBps, color: TOKEN_META.EURC.color },
-            { label: 'cirBTC', value: btcHeld,  dec: 8, digits: 6, bps: btcBps,  color: TOKEN_META.CIRBTC.color },
-          ] as const).map(({ label, value, dec, digits, bps, color }) => (
+            { label: 'USDC',   tok: 'USDC'    as const, value: usdcHeld, dec: 6, digits: 2, bps: usdcBps },
+            { label: 'EURC',   tok: 'EURC'    as const, value: eurcHeld, dec: 6, digits: 2, bps: eurcBps },
+            { label: 'cirBTC', tok: 'CIRBTC'  as const, value: btcHeld,  dec: 8, digits: 8, bps: btcBps  },
+          ]).map(({ label, tok, value, dec, digits, bps }) => (
             <div key={label} style={glass.inner} className="flex items-center justify-between px-4 py-3">
               <div className="flex items-center gap-2 w-20 shrink-0">
-                <span className="size-2.5 rounded-full shrink-0" style={{ background: color }} />
+                <TokenLogo token={tok} size={18} />
                 <span className="text-sm font-semibold" style={{ color: 'var(--ink-2)' }}>{label}</span>
               </div>
               <span className="display text-sm font-bold tabular-nums flex-1 text-center" style={{ color: value > 0n ? 'var(--ink)' : 'var(--subtle)' }}>
                 {posLoading ? '…' : formatUnits(value, dec, digits)}
               </span>
-              <span className="text-xs font-semibold tabular-nums px-1.5 py-0.5 rounded-lg w-12 text-right shrink-0" style={{ background: `${color}22`, color }}>
+              <span className="text-xs font-semibold tabular-nums px-1.5 py-0.5 rounded-lg w-12 text-right shrink-0" style={{ background: 'rgba(172,198,233,0.12)', color: 'var(--accent)' }}>
                 {(bps / 100).toFixed(0)}%
               </span>
             </div>
@@ -379,18 +418,32 @@ export function BasketTab() {
                 {btcPoolOk ? formatUnits(minBtc, 8, 8) : 'pool empty'}
               </span>
             </div>
+            {depositImpactBps > 0 && (
+              <div className="flex justify-between pt-1 border-t" style={{ borderColor: 'rgba(255,255,255,0.07)' }}>
+                <span style={{ color: 'var(--subtle)' }}>Price impact</span>
+                <span className="tabular-nums font-semibold" style={{ color: depositImpactBps >= 1000 ? 'var(--danger)' : depositImpactBps >= 200 ? '#f59e0b' : 'var(--subtle)' }}>
+                  {(depositImpactBps / 100).toFixed(2)}%
+                </span>
+              </div>
+            )}
+            {depositImpactBps >= 1000 && (
+              <div className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-lg" style={{ background: 'rgba(232,109,122,0.10)', border: '1px solid rgba(232,109,122,0.20)', color: 'var(--danger)' }}>
+                <AlertCircle className="size-3 shrink-0" />
+                Low liquidity: large price impact
+              </div>
+            )}
           </div>
         )}
 
         {/* Allocation chips + editor */}
         <div className="flex items-center gap-2 mb-3 flex-wrap">
           {([
-            { label: 'USDC',   bps: usdcBps, color: TOKEN_META.USDC.color },
-            { label: 'EURC',   bps: eurcBps, color: TOKEN_META.EURC.color },
-            { label: 'cirBTC', bps: btcBps,  color: TOKEN_META.CIRBTC.color },
-          ]).map(({ label, bps, color }) => (
+            { label: 'USDC',   tok: 'USDC'   as const, bps: usdcBps },
+            { label: 'EURC',   tok: 'EURC'   as const, bps: eurcBps },
+            { label: 'cirBTC', tok: 'CIRBTC' as const, bps: btcBps  },
+          ]).map(({ label, tok, bps }) => (
             <span key={label} className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full" style={{ background: 'rgba(255,255,255,0.08)', color: 'var(--ink-2)' }}>
-              <span className="size-1.5 rounded-full inline-block" style={{ background: color }} />
+              <TokenLogo token={tok} size={12} />
               {(bps / 100).toFixed(0)}% {label}
             </span>
           ))}
@@ -608,6 +661,20 @@ export function BasketTab() {
                   <span className="text-xs font-semibold" style={{ color: 'var(--ink-2)' }}>Min total (after {(slipBps / 100).toFixed(0)}% slippage)</span>
                   <span className="display text-sm tabular-nums font-bold" style={{ color: 'var(--success)' }}>${formatUsd(minWithdrawUsdc)}</span>
                 </div>
+                {withdrawImpactBps > 0 && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs" style={{ color: 'var(--subtle)' }}>Price impact</span>
+                    <span className="text-xs tabular-nums font-semibold" style={{ color: withdrawImpactBps >= 1000 ? 'var(--danger)' : withdrawImpactBps >= 200 ? '#f59e0b' : 'var(--subtle)' }}>
+                      {(withdrawImpactBps / 100).toFixed(2)}%
+                    </span>
+                  </div>
+                )}
+                {withdrawImpactBps >= 1000 && (
+                  <div className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-lg" style={{ background: 'rgba(232,109,122,0.10)', border: '1px solid rgba(232,109,122,0.20)', color: 'var(--danger)' }}>
+                    <AlertCircle className="size-3 shrink-0" />
+                    Low liquidity: large price impact
+                  </div>
+                )}
               </>
             ) : (
               <>

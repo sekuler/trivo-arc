@@ -37,5 +37,13 @@ export default defineConfig({
   server: {
     allowedHosts: true,
     cors: true,
+    proxy: {
+      // In dev, /api/rpc proxies to Arc Mainnet so browser CORS is bypassed.
+      '/api/rpc': {
+        target:       'https://rpc.mainnet.arc.io',
+        changeOrigin: true,
+        rewrite:      (path) => path.replace(/^\/api\/rpc/, ''),
+      },
+    },
   },
 })
