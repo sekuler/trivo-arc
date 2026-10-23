@@ -1,0 +1,44 @@
+# ── Secrets & env files ───────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.secret
+
+# Circle credentials
+.circle/
+recovery_file*
+
+# ── Dependencies ──────────────────────────────────────────────────────────────
+node_modules/
+
+# ── Build output ──────────────────────────────────────────────────────────────
+dist/
+build/
+.vite/
+
+# Foundry build cache & output (keep source, exclude compiled artefacts)
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+
+# ── Editor & OS ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/settings.json
+
+# ── Logs & temp ───────────────────────────────────────────────────────────────
+*.log
+/tmp/
+
+# Foundry libraries (install with: forge install foundry-rs/forge-std --no-git)
+lib/
+
+# Arc Studio internal files
+.agents/
+traces.jsonl
+console.jsonl
