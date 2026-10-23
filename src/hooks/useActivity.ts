@@ -31,7 +31,7 @@ export function loadActivity(address: string): ActivityEntry[] {
   }
 }
 
-export function saveActivity(address: string, entry: ActivityEntry): void {
+export function saveActivity(address: string, entry: ActivityEntry, onSaved?: () => void): void {
   try {
     const existing = loadActivity(address)
     // Deduplicate by id
@@ -39,6 +39,7 @@ export function saveActivity(address: string, entry: ActivityEntry): void {
     // Prepend newest, cap at MAX_ENTRIES
     const updated = [entry, ...filtered].slice(0, MAX_ENTRIES)
     localStorage.setItem(storageKey(address), JSON.stringify(updated))
+    onSaved?.()
   } catch {
     // Storage blocked or full — fail silently
   }

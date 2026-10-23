@@ -10,6 +10,7 @@ import { ExternalLink } from 'lucide-react'
 import { IS_MAINNET, TARGET_CHAIN_ID, MAINNET_ADDRESSES } from '../contracts'
 import { loadActivity, type ActivityEntry } from '../hooks/useActivity'
 import { buildTxExplorerUrl, buildAddressExplorerUrl } from '@/onchain-facts'
+import { useRefresh } from '../context/RefreshContext'
 
 const glass = {
   card:  { background: 'rgba(255,255,255,0.07)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '24px' },
@@ -37,16 +38,18 @@ function timeAgo(ts: number): string {
 
 export function RecentActivity() {
   const { address, isConnected } = useAccount()
+  const { refreshKey } = useRefresh()
   const [items, setItems] = useState<ActivityEntry[]>([])
   const [, setTick] = useState(0)
 
-  // Load from localStorage whenever address changes (deferred to avoid setState-in-effect lint)
+  // Load from localStorage whenever address or refreshKey changes
+  // (deferred to avoid setState-in-effect lint; refreshKey fires after every confirmed tx)
   useEffect(() => {
     const t = setTimeout(() => {
       setItems(address ? loadActivity(address) : [])
     }, 0)
     return () => clearTimeout(t)
-  }, [address])
+  }, [address, refreshKey])
 
   // Re-render time-ago labels every minute
   useEffect(() => {

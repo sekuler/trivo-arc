@@ -188,7 +188,7 @@ function PoolCard({ pool }: { pool: Pool }) {
           desc: `Added ${formatUnits(pendingUsdc, 6, 2)} USDC + ${formatUnits(pendingT1, info.token1Dec, info.token1Dec)} ${info.token1} to ${info.label} pool`,
           txHash: addHash,
           timestamp: Date.now(),
-        })
+        }, triggerRefresh)
       }
       setUsdcAmt('')
       setTokenAmt('')
@@ -288,7 +288,7 @@ function PoolCard({ pool }: { pool: Pool }) {
           desc: `Removed ${formatUnits(pendingLp, 18, 4)} LP from ${info.label} pool`,
           txHash: removeHash,
           timestamp: Date.now(),
-        })
+        }, triggerRefresh)
       }
       setLpAmt('')
       setTimeout(() => setRemoveStep('idle'), 2000)

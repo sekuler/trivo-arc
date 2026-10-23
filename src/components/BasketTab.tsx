@@ -187,7 +187,7 @@ export function BasketTab() {
           desc: `Deposited ${formatUnits(pendingAmt, 6, 2)} USDC to basket`,
           txHash: depositHash,
           timestamp: Date.now(),
-        })
+        }, triggerRefresh)
       }
       setDepositAmt('')
       setTimeout(() => setDepositStep('idle'), 3000)
@@ -216,7 +216,7 @@ export function BasketTab() {
           desc: `Withdrew ${(activeBps / 100).toFixed(activeBps % 100 === 0 ? 0 : 2)}% from basket${withdrawMode === 'usdc' ? ' as USDC' : ' as tokens'}`,
           txHash: withdrawHash,
           timestamp: Date.now(),
-        })
+        }, triggerRefresh)
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps

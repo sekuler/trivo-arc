@@ -110,7 +110,7 @@ function StreamCard({ stream, onAction }: { stream: Stream; onAction: () => void
             : `Stopped stream #${stream.id.toString()}`,
           txHash,
           timestamp: Date.now(),
-        })
+        }, triggerRefresh)
       }
       setAction('idle')
       setErr('')
@@ -371,7 +371,7 @@ export function StreamTab() {
           desc: `Started ${formatUnits(amountRef.current, 6, 2)} USDC stream over ${dLabel}`,
           txHash: startTxHash,
           timestamp: Date.now(),
-        })
+        }, triggerRefresh)
       }
       setAmount('')
       triggerRefresh()

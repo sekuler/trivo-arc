@@ -282,7 +282,7 @@ export function SwapTab() {
           desc: `Swapped ${amountInRef.current} ${TOKEN_LABEL[tokenInRef.current]} → ${TOKEN_LABEL[tokenOutRef.current]}`,
           txHash: swap1Hash,
           timestamp: Date.now(),
-        })
+        }, triggerRefresh)
       }
       setAmountIn('')
       setTimeout(() => setStep('idle'), 2000)
@@ -356,7 +356,7 @@ export function SwapTab() {
         desc: `Swapped ${amountInRef.current} ${TOKEN_LABEL[tokenInRef.current]} → ${TOKEN_LABEL[tokenOutRef.current]} (via USDC)`,
         txHash: swap2Hash,
         timestamp: Date.now(),
-      })
+      }, triggerRefresh)
     }
     setAmountIn('')
     setTimeout(() => setStep('idle'), 2000)
