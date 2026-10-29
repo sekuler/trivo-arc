@@ -12,14 +12,15 @@ import { v12KitchenAbi } from '@eco-incorp/sauce/evm/engine'
 import {
   KITCHEN, MIN_FEE_PER_GAS,
   DEFAULT_POT_SALT, kitchenExecutionFee, v12PredictPot,
-  buildWithdrawCall, buildConditionalBuyCall,
+  buildWithdrawCall, buildConditionalBuyCall, useSauce,
   type CompiledPrograms,
 } from '../hooks/useSauce'
+import { useRefresh } from '../context/RefreshContext'
 import { TARGET_CHAIN_ID, MAINNET_ADDRESSES } from '../contracts'
 import { usePoolReserves, useBasketAllocation } from '../hooks/useContracts'
 import { buildTxExplorerUrl } from '@/onchain-facts'
 import { formatUnits } from '../utils/format'
-import { ExternalLink, CheckCircle, AlertCircle, Loader } from 'lucide-react'
+import { ExternalLink, AlertCircle, Loader } from 'lucide-react'
 
 const glass = {
   card:  { background: 'rgba(255,255,255,0.07)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '24px' },
@@ -107,6 +108,7 @@ export function PotPanel({ compiled, sauceReady, sauceError, onPotFunded }: Prop
   const [maxPrice, setMaxPrice]     = useState('')
   const [buyStep, setBuyStep]       = useState<'idle' | 'simulating' | 'sending' | 'done'>('idle')
   const [lastBuyTx, setLastBuyTx]   = useState<Hex | null>(null)
+  const [showFund, setShowFund]     = useState(false)
 
   // Live pool data (cirBTC price + quotes for slippage floors)
   const { reserve0: eurcR0, reserve1: eurcR1 } = usePoolReserves(MAINNET_ADDRESSES.POOL_USDC_EURC)
@@ -354,214 +356,209 @@ export function PotPanel({ compiled, sauceReady, sauceError, onPotFunded }: Prop
     }
   }
 
-  if (!isConnected) return null
-
   const explorerBase = `https://explorer.arc.io`
+  const priceWhole = btcPrice / 1_000_000n
+  const inputStyle = { color: 'var(--ink)' } as const
+  const linkBtn = 'text-xs font-semibold transition-opacity hover:opacity-80 disabled:opacity-40'
+  const buyDisabled = buyStep !== 'idle' || !sauceReady || !compiled || potDeployed !== true || buyAmt === 0n || buyAmt > potUsdc || maxPriceRaw === 0n
 
   return (
-    <div style={glass.card} className="p-5 mt-4">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <span className="text-xs font-semibold tracking-widest uppercase" style={{ color: 'var(--subtle)' }}>
-          Eco Sauce Pot
-        </span>
-        {sauceReady
-          ? <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'rgba(34,197,94,0.15)', color: 'var(--success)' }}>Ready</span>
-          : <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'rgba(255,255,255,0.07)', color: 'var(--subtle)' }}>Loading…</span>
-        }
-      </div>
-
-      {sauceError && (
-        <div className="text-xs mb-3 p-2 rounded-lg" style={{ background: 'rgba(239,68,68,0.12)', color: 'var(--danger)', border: '1px solid rgba(239,68,68,0.2)' }}>
-          Sauce compiler error: {sauceError}
+    <div className="space-y-4">
+      <div style={glass.card} className="p-5">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-semibold" style={{ color: 'var(--ink-2)' }}>Limit Buy</h3>
+          <span className="text-xs tabular-nums" style={{ color: 'var(--subtle)' }}>
+            cirBTC now: <span style={{ color: 'var(--ink)' }}>{btcPrice > 0n ? priceWhole.toLocaleString('en-US') : '…'}</span> USDC
+          </span>
         </div>
-      )}
 
-      {error && (
-        <div className="flex items-start gap-2 text-xs mb-3 p-2 rounded-lg" style={{ background: 'rgba(239,68,68,0.12)', color: 'var(--danger)', border: '1px solid rgba(239,68,68,0.2)' }}>
-          <AlertCircle className="size-3.5 shrink-0 mt-0.5" />
-          <span className="break-all">{error}</span>
-        </div>
-      )}
+        {!isConnected && (
+          <p className="text-sm py-6 text-center" style={{ color: 'var(--subtle)' }}>Connect your wallet to use Limit Buy.</p>
+        )}
 
-      {/* Pot address row */}
-      <div style={glass.inner} className="px-4 py-3 mb-3">
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-xs" style={{ color: 'var(--subtle)' }}>Your Pot</span>
-          {potDeployed === true && <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--success)' }}><CheckCircle className="size-3" /> Deployed</span>}
-          {potDeployed === false && <span className="text-xs" style={{ color: 'var(--muted)' }}>Not deployed</span>}
-          {potDeployed === null && <Loader className="size-3 animate-spin" style={{ color: 'var(--subtle)' }} />}
-        </div>
-        {potAddress
-          ? <a href={`${explorerBase}/address/${potAddress}`} target="_blank" rel="noreferrer"
-               className="flex items-center gap-1 text-xs font-mono" style={{ color: 'var(--accent)' }}>
-              {potAddress.slice(0, 10)}…{potAddress.slice(-8)} <ExternalLink className="size-3" />
-            </a>
-          : <span className="text-xs" style={{ color: 'var(--muted)' }}>Deriving…</span>
-        }
-      </div>
+        {isConnected && sauceError && (
+          <div className="text-xs mb-3 p-2 rounded-lg" style={{ background: 'rgba(239,68,68,0.12)', color: 'var(--danger)', border: '1px solid rgba(239,68,68,0.2)' }}>
+            Sauce compiler error: {sauceError}
+          </div>
+        )}
 
-      {/* Deploy Pot */}
-      {potDeployed === false && (
-        <button
-          onClick={() => { void handleDeploy() }}
-          disabled={deployStep !== 'idle' || !sauceReady}
-          className="w-full rounded-xl py-2.5 text-sm font-semibold mb-3 transition-opacity"
-          style={{
-            background: deployStep !== 'idle' ? 'rgba(255,255,255,0.08)' : 'var(--accent)',
-            color: deployStep !== 'idle' ? 'var(--muted)' : '#fff',
-            opacity: deployStep !== 'idle' ? 0.7 : 1,
-          }}>
-          {deployStep === 'idle'      && 'Deploy Pot'}
-          {deployStep === 'simulating'&& 'Simulating…'}
-          {deployStep === 'sending'   && 'Sending…'}
-          {deployStep === 'done'      && '✓ Pot Deployed'}
-        </button>
-      )}
-      {deployHash && (
-        <a href={buildTxExplorerUrl(TARGET_CHAIN_ID, deployHash)} target="_blank" rel="noreferrer"
-           className="flex items-center gap-1 text-xs mb-3" style={{ color: 'var(--accent)' }}>
-          Deploy tx <ExternalLink className="size-3" />
-        </a>
-      )}
+        {isConnected && error && (
+          <div className="flex items-start gap-2 text-xs mb-3 p-2 rounded-lg" style={{ background: 'rgba(239,68,68,0.12)', color: 'var(--danger)', border: '1px solid rgba(239,68,68,0.2)' }}>
+            <AlertCircle className="size-3.5 shrink-0 mt-0.5" />
+            <span className="break-all">{error}</span>
+          </div>
+        )}
 
-      {/* Fund Pot */}
-      {potDeployed === true && (
-        <>
-          <div style={glass.inner} className="px-4 py-3 mb-3">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium" style={{ color: 'var(--ink-2)' }}>Pot USDC balance</span>
-              <span className="text-sm font-bold tabular-nums" style={{ color: 'var(--ink)' }}>
-                {formatUnits(potUsdc, 6, 6)} USDC
-              </span>
-            </div>
-            <div className="flex gap-2">
+        {/* One-time setup */}
+        {isConnected && potDeployed === null && (
+          <div className="flex justify-center py-6"><Loader className="size-4 animate-spin" style={{ color: 'var(--subtle)' }} /></div>
+        )}
+        {isConnected && potDeployed === false && (
+          <>
+            <p className="text-sm mb-4" style={{ color: 'var(--subtle)' }}>
+              Buy the basket only when cirBTC is at or below your price. First, create your Pot: a small onchain account owned by your wallet that holds the USDC for your limit buys.
+            </p>
+            <button
+              onClick={() => { void handleDeploy() }}
+              disabled={deployStep !== 'idle' || !sauceReady}
+              className="w-full py-3.5 rounded-2xl text-sm font-bold transition-opacity disabled:opacity-40"
+              style={{ background: 'var(--accent)', color: '#0d1b2f' }}>
+              {deployStep === 'idle'       && 'Create your Pot'}
+              {deployStep === 'simulating' && 'Checking…'}
+              {deployStep === 'sending'    && 'Creating…'}
+              {deployStep === 'done'       && '✓ Pot created'}
+            </button>
+          </>
+        )}
+
+        {/* Limit buy form */}
+        {isConnected && potDeployed === true && (
+          <>
+            {/* Amount */}
+            <div style={glass.inner} className="p-4 mb-2">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs" style={{ color: 'var(--subtle)' }}>You spend (USDC)</span>
+                <button onClick={() => setBuyAmount(formatUnits(potUsdc, 6, 6))} disabled={potUsdc === 0n}
+                  className={linkBtn} style={{ color: 'var(--accent)' }}>
+                  Pot: {formatUnits(potUsdc, 6, 6)} Max
+                </button>
+              </div>
               <input
-                type="number"
-                value={fundAmount}
-                onChange={e => setFundAmount(e.target.value)}
-                min="0"
-                step="0.1"
-                placeholder="1"
-                className="flex-1 rounded-lg px-3 py-1.5 text-sm"
-                style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: 'var(--ink)', outline: 'none' }}
-              />
-              <button
-                onClick={() => { void handleFund() }}
-                disabled={fundStep !== 'idle' || !sauceReady}
-                className="rounded-lg px-4 py-1.5 text-xs font-semibold transition-opacity"
-                style={{
-                  background: fundStep !== 'idle' ? 'rgba(255,255,255,0.08)' : 'var(--accent)',
-                  color: fundStep !== 'idle' ? 'var(--muted)' : '#fff',
-                  opacity: fundStep !== 'idle' ? 0.7 : 1,
-                }}>
-                {fundStep === 'idle'       && 'Fund Pot'}
-                {fundStep === 'simulating' && 'Simulating…'}
-                {fundStep === 'sending'    && 'Sending…'}
-                {fundStep === 'done'       && '✓ Funded'}
-              </button>
+                inputMode="decimal" value={buyAmount}
+                onChange={e => setBuyAmount(e.target.value.replace(',', '.').replace(/[^0-9.]/g, ''))}
+                placeholder="0.00"
+                className="display w-full bg-transparent text-3xl font-bold tabular-nums outline-none placeholder:opacity-20"
+                style={inputStyle} />
             </div>
-            {fundHash && (
-              <a href={buildTxExplorerUrl(TARGET_CHAIN_ID, fundHash)} target="_blank" rel="noreferrer"
-                 className="flex items-center gap-1 text-xs mt-2" style={{ color: 'var(--accent)' }}>
-                Fund tx <ExternalLink className="size-3" />
+
+            {/* Max price */}
+            <div style={glass.inner} className="p-4 mb-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs" style={{ color: 'var(--subtle)' }}>Buy only if cirBTC ≤ (USDC)</span>
+                <button onClick={() => setMaxPrice(String(priceWhole))} disabled={btcPrice === 0n}
+                  className={linkBtn} style={{ color: 'var(--accent)' }}>
+                  Use current
+                </button>
+              </div>
+              <input
+                inputMode="numeric" value={maxPrice}
+                onChange={e => setMaxPrice(e.target.value.replace(/[^0-9]/g, ''))}
+                placeholder={btcPrice > 0n ? String(priceWhole) : '0'}
+                className="display w-full bg-transparent text-3xl font-bold tabular-nums outline-none placeholder:opacity-20"
+                style={inputStyle} />
+              {maxPriceRaw > 0n && btcPrice > 0n && (
+                <div className="text-xs mt-2" style={{ color: conditionMet ? 'var(--success)' : 'var(--subtle)' }}>
+                  {conditionMet ? '✓ Condition met at the current price.' : 'Price is above your limit. The buy will not execute.'}
+                </div>
+              )}
+            </div>
+
+            {/* Buy */}
+            <button
+              onClick={() => { void handleConditionalBuy() }}
+              disabled={buyDisabled}
+              className="w-full py-3.5 rounded-2xl text-sm font-bold transition-opacity disabled:opacity-40"
+              style={{ background: 'var(--accent)', color: '#0d1b2f' }}>
+              {buyStep === 'idle'       && (buyAmt > potUsdc ? 'Add funds to your Pot first' : 'Buy basket')}
+              {buyStep === 'simulating' && 'Checking price…'}
+              {buyStep === 'sending'    && 'Buying…'}
+              {buyStep === 'done'       && '✓ Basket bought'}
+            </button>
+            {lastBuyTx && (
+              <a href={buildTxExplorerUrl(TARGET_CHAIN_ID, lastBuyTx)} target="_blank" rel="noreferrer"
+                 className="flex items-center justify-center gap-1 text-xs mt-2" style={{ color: 'var(--accent)' }}>
+                View buy transaction <ExternalLink className="size-3" />
               </a>
             )}
-          </div>
 
-          {/* Conditional buy */}
-          <div style={glass.inner} className="px-4 py-3 mb-3">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium" style={{ color: 'var(--ink-2)' }}>Conditional buy</span>
-              <span className="text-xs tabular-nums" style={{ color: 'var(--subtle)' }}>
-                cirBTC now: {btcPrice > 0n ? formatUnits(btcPrice, 6, 2) : '…'} USDC
+            {/* Pot footer */}
+            <div className="mt-4 pt-3 flex items-center justify-between gap-2 text-xs" style={{ borderTop: '1px solid var(--border)' }}>
+              <span style={{ color: 'var(--subtle)' }}>
+                Pot{' '}
+                {potAddress && (
+                  <a href={`${explorerBase}/address/${potAddress}`} target="_blank" rel="noreferrer"
+                     className="font-mono" style={{ color: 'var(--accent)' }}>
+                    {potAddress.slice(0, 6)}…{potAddress.slice(-4)}
+                  </a>
+                )}
+                {' · '}<span className="tabular-nums" style={{ color: 'var(--ink)' }}>{formatUnits(potUsdc, 6, 6)} USDC</span>
+              </span>
+              <span className="flex items-center gap-3">
+                <button onClick={() => setShowFund(v => !v)} className={linkBtn} style={{ color: 'var(--accent)' }}>
+                  Add funds
+                </button>
+                <button onClick={() => { void handleWithdraw() }}
+                  disabled={withdrawStep !== 'idle' || potUsdc === 0n || !compiled}
+                  className={linkBtn} style={{ color: 'var(--danger)' }}>
+                  {withdrawStep === 'idle' ? 'Withdraw' : withdrawStep === 'done' ? '✓ Withdrawn' : 'Withdrawing…'}
+                </button>
               </span>
             </div>
-            <div className="flex flex-col gap-2">
-              <label className="text-xs" style={{ color: 'var(--subtle)' }}>
-                USDC amount (from your Pot)
-                <input
-                  type="text" inputMode="decimal" value={buyAmount}
-                  onChange={e => setBuyAmount(e.target.value.replace(',', '.').replace(/[^0-9.]/g, ''))}
-                  placeholder="0.5"
-                  className="w-full mt-1 rounded-lg px-3 py-1.5 text-sm"
-                  style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: 'var(--ink)', outline: 'none' }}
-                />
-              </label>
-              <label className="text-xs" style={{ color: 'var(--subtle)' }}>
-                Max cirBTC price (whole USDC, e.g. 81500)
-                <input
-                  type="text" inputMode="numeric" value={maxPrice}
-                  onChange={e => setMaxPrice(e.target.value.replace(/[^0-9]/g, ''))}
-                  placeholder={btcPrice > 0n ? formatUnits(btcPrice, 6, 0) : ''}
-                  className="w-full mt-1 rounded-lg px-3 py-1.5 text-sm"
-                  style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: 'var(--ink)', outline: 'none' }}
-                />
-              </label>
-              {maxPriceRaw > 0n && btcPrice > 0n && (
-                <span className="text-xs" style={{ color: conditionMet ? 'var(--success)' : 'var(--subtle)' }}>
-                  {conditionMet ? 'Condition met at the current price.' : 'Price is above your limit. The buy will not execute.'}
-                </span>
-              )}
-              <button
-                onClick={() => { void handleConditionalBuy() }}
-                disabled={buyStep !== 'idle' || !sauceReady || !compiled || potDeployed !== true || buyAmt === 0n || buyAmt > potUsdc || maxPriceRaw === 0n}
-                className="w-full rounded-lg py-2 text-xs font-semibold transition-opacity"
-                style={{
-                  background: buyStep !== 'idle' ? 'rgba(255,255,255,0.08)' : 'var(--accent)',
-                  color: buyStep !== 'idle' ? 'var(--muted)' : '#fff',
-                  opacity: (buyStep !== 'idle' || buyAmt === 0n || buyAmt > potUsdc || maxPriceRaw === 0n) ? 0.6 : 1,
-                }}>
-                {buyStep === 'idle'       && (buyAmt > potUsdc ? 'Fund your Pot first' : 'Buy basket if price ≤ limit')}
-                {buyStep === 'simulating' && 'Checking price…'}
-                {buyStep === 'sending'    && 'Sending cook…'}
-                {buyStep === 'done'       && '✓ Basket bought'}
-              </button>
-              <span className="text-xs" style={{ color: 'var(--muted)' }}>
-                Executes only if the cirBTC price is at or below your limit. Powered by Eco Sauce.
-              </span>
-              {lastBuyTx && (
-                <a href={buildTxExplorerUrl(TARGET_CHAIN_ID, lastBuyTx)} target="_blank" rel="noreferrer"
-                   className="flex items-center gap-1 text-xs" style={{ color: 'var(--accent)' }}>
-                  Buy tx <ExternalLink className="size-3" />
-                </a>
-              )}
-            </div>
-          </div>
 
-          {/* Withdraw from Pot */}
-          {potUsdc > 0n && (
-            <button
-              onClick={() => { void handleWithdraw() }}
-              disabled={withdrawStep !== 'idle' || !sauceReady || !compiled}
-              className="w-full rounded-xl py-2.5 text-sm font-semibold transition-opacity"
-              style={{
-                background: withdrawStep !== 'idle' ? 'rgba(255,255,255,0.08)' : 'rgba(239,68,68,0.18)',
-                color: withdrawStep !== 'idle' ? 'var(--muted)' : 'var(--danger)',
-                border: '1px solid rgba(239,68,68,0.25)',
-                opacity: withdrawStep !== 'idle' ? 0.7 : 1,
-              }}>
-              {withdrawStep === 'idle'       && `Withdraw ${formatUnits(potUsdc, 6, 6)} USDC from Pot`}
-              {withdrawStep === 'simulating' && 'Simulating…'}
-              {withdrawStep === 'sending'    && 'Sending cook…'}
-              {withdrawStep === 'done'       && '✓ Withdrawn'}
-            </button>
-          )}
-          {lastWithdrawTx && (
-            <a href={buildTxExplorerUrl(TARGET_CHAIN_ID, lastWithdrawTx)} target="_blank" rel="noreferrer"
-               className="flex items-center gap-1 text-xs mt-2" style={{ color: 'var(--accent)' }}>
-              Withdraw tx <ExternalLink className="size-3" />
-            </a>
-          )}
-        </>
-      )}
+            {showFund && (
+              <div className="flex gap-2 mt-3">
+                <input
+                  inputMode="decimal" value={fundAmount}
+                  onChange={e => setFundAmount(e.target.value.replace(',', '.').replace(/[^0-9.]/g, ''))}
+                  placeholder="USDC"
+                  className="flex-1 rounded-xl px-3 py-2 text-sm bg-transparent outline-none tabular-nums"
+                  style={{ border: '1px solid var(--border)', color: 'var(--ink)' }} />
+                <button onClick={() => { void handleFund() }}
+                  disabled={fundStep !== 'idle' || !sauceReady}
+                  className="rounded-xl px-4 py-2 text-xs font-bold transition-opacity disabled:opacity-40"
+                  style={{ background: 'var(--accent)', color: '#0d1b2f' }}>
+                  {fundStep === 'idle' ? 'Add to Pot' : fundStep === 'done' ? '✓ Added' : 'Adding…'}
+                </button>
+              </div>
+            )}
 
-      <p className="text-xs mt-4" style={{ color: 'var(--muted)' }}>
-        Powered by{' '}
-        <a href="https://eco.com" target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>Eco Sauce</a>.
-        Your Pot is a smart contract that holds USDC and executes the conditional buy program atomically.
-      </p>
+            {(fundHash || lastWithdrawTx) && (
+              <div className="flex gap-3 mt-2">
+                {fundHash && (
+                  <a href={buildTxExplorerUrl(TARGET_CHAIN_ID, fundHash)} target="_blank" rel="noreferrer"
+                     className="flex items-center gap-1 text-xs" style={{ color: 'var(--accent)' }}>
+                    Funding tx <ExternalLink className="size-3" />
+                  </a>
+                )}
+                {lastWithdrawTx && (
+                  <a href={buildTxExplorerUrl(TARGET_CHAIN_ID, lastWithdrawTx)} target="_blank" rel="noreferrer"
+                     className="flex items-center gap-1 text-xs" style={{ color: 'var(--accent)' }}>
+                    Withdraw tx <ExternalLink className="size-3" />
+                  </a>
+                )}
+              </div>
+            )}
+          </>
+        )}
+
+        {deployHash && potDeployed !== true && (
+          <a href={buildTxExplorerUrl(TARGET_CHAIN_ID, deployHash)} target="_blank" rel="noreferrer"
+             className="flex items-center gap-1 text-xs mt-2" style={{ color: 'var(--accent)' }}>
+            Pot creation tx <ExternalLink className="size-3" />
+          </a>
+        )}
+
+        <p className="text-xs mt-4" style={{ color: 'var(--muted)' }}>
+          Executes only if the cirBTC price is at or below your limit. Powered by{' '}
+          <a href="https://eco.com" target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>Eco Sauce</a>.
+        </p>
+      </div>
     </div>
+  )
+}
+
+// Limit Buy tab: loads the Sauce compiler and renders the panel
+export function LimitBuyTab() {
+  const { compiled, sauceReady, sauceError } = useSauce()
+  const { triggerRefresh } = useRefresh()
+  return (
+    <PotPanel
+      compiled={compiled}
+      sauceReady={sauceReady}
+      sauceError={sauceError}
+      onPotFunded={() => triggerRefresh()}
+    />
   )
 }
 

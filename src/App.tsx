@@ -4,19 +4,24 @@ import { BasketTab } from './components/BasketTab'
 import { SwapTab } from './components/SwapTab'
 import { PoolTab } from './components/PoolTab'
 import { StreamTab } from './components/StreamTab'
+import { LimitBuyTab } from './components/PotPanel'
+import { GatewaySection } from './components/GatewaySection'
+import { toast } from 'sonner'
 import { WalletBalancesCard } from './components/WalletBalancesCard'
 import { RecentActivity } from './components/RecentActivity'
 import { SidePanelLeft } from './components/SidePanelLeft'
 import { SidePanelRight } from './components/SidePanelRight'
 import { IS_MAINNET } from './contracts'
 
-type Tab = 'basket' | 'swap' | 'pool' | 'stream'
+type Tab = 'basket' | 'swap' | 'pool' | 'stream' | 'limit' | 'gateway'
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: 'basket', label: 'Basket' },
-  { id: 'stream', label: 'Stream' },
-  { id: 'swap',   label: 'Swap'   },
-  { id: 'pool',   label: 'Pool'   },
+  { id: 'basket',  label: 'Basket' },
+  { id: 'swap',    label: 'Swap' },
+  { id: 'gateway', label: 'Gateway' },
+  { id: 'limit',   label: 'Limit Buy' },
+  { id: 'pool',    label: 'Pool' },
+  { id: 'stream',  label: 'Stream' },
 ]
 
 export default function App() {
@@ -73,12 +78,12 @@ export default function App() {
           <main className="flex-1 min-w-0 pb-10">
             {/* Tab nav */}
             <div className="max-w-md mx-auto">
-              <div className="flex gap-1 p-1 rounded-2xl mb-4" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)' }}>
+              <div className="flex gap-1 p-1 rounded-2xl mb-4 overflow-x-auto" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)' }}>
                 {TABS.map(({ id, label }) => (
                   <button
                     key={id}
                     onClick={() => setTab(id)}
-                    className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all"
+                    className="flex-1 shrink-0 whitespace-nowrap px-2.5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all"
                     style={{
                       background: tab === id ? 'rgba(172,198,233,0.15)' : 'transparent',
                       color: tab === id ? 'var(--accent)' : 'var(--subtle)',
@@ -91,12 +96,20 @@ export default function App() {
               </div>
             </div>
 
-            {/* Tab content — basket is wider to fit two-column gateway layout */}
-            <div className={`mx-auto ${tab === 'basket' ? 'max-w-2xl' : 'max-w-md'}`}>
+            {/* Tab content */}
+            <div className="mx-auto max-w-md">
               {tab === 'basket' && <BasketTab />}
               {tab === 'stream' && <StreamTab />}
               {tab === 'swap'   && <SwapTab />}
               {tab === 'pool'   && <PoolTab />}
+              {tab === 'limit'  && <LimitBuyTab />}
+              {tab === 'gateway' && (
+                <GatewaySection
+                  onUsdcArrivedOnArc={(amt) => {
+                    toast.success(`${parseFloat(amt).toFixed(2)} USDC arriving on Arc. Open the Basket tab to deposit it.`, { duration: 6000 })
+                  }}
+                />
+              )}
             </div>
 
             {/* Recent activity */}
