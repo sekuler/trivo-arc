@@ -20,7 +20,8 @@ import { TARGET_CHAIN_ID, MAINNET_ADDRESSES } from '../contracts'
 import { usePoolReserves, useBasketAllocation } from '../hooks/useContracts'
 import { buildTxExplorerUrl } from '@/onchain-facts'
 import { formatUnits } from '../utils/format'
-import { ExternalLink, AlertCircle, Loader } from 'lucide-react'
+import { ExternalLink, AlertCircle, Loader, Clock, X } from 'lucide-react'
+import { useOrders, ammQuote, BOT_ADDRESS, type SignedOrder } from '../hooks/useOrders'
 
 const glass = {
   card:  { background: 'rgba(255,255,255,0.07)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '24px' },
@@ -31,20 +32,20 @@ const MIN_FEE = MIN_FEE_PER_GAS
 const USDC_ADDR = MAINNET_ADDRESSES.USDC
 
 interface Props {
-  compiled: CompiledPrograms | null
-  sauceReady: boolean
-  sauceError: string | null
+  compiled:    CompiledPrograms | null
+  sauceReady:  boolean
+  sauceError:  string | null
   onPotFunded?: () => void
+  // Order management (passed from LimitBuyTab which owns useOrders)
+  orders:        SignedOrder[]
+  ordersState:   string
+  ordersError:   string | null
+  onSubmitOrder: (usdcAmount: bigint, targetPrice: bigint, label: string) => Promise<boolean>
+  onCancelOrder: (nonce: string) => Promise<boolean>
+  onInvalidateOnchain: (nonce: bigint) => Promise<Hex | null>
 }
 
-// Uniswap-V2 style quote (0.3% fee), same formula as the Basket deposit preview
-function ammQuote(amountIn: bigint, reserveIn: bigint, reserveOut: bigint): bigint {
-  if (amountIn === 0n || reserveIn === 0n || reserveOut === 0n) return 0n
-  const fee = amountIn * 997n
-  return (fee * reserveOut) / (reserveIn * 1000n + fee)
-}
-
-const BUY_SLIPPAGE_BPS = 100n // 1%
+const BUY_SLIPPAGE_BPS = 100n // 1% — used for the immediate-buy minBtc/minEurc only
 
 // Decode a revert reason from raw revert data
 function decodeRevert(data: Hex | undefined): string {
@@ -68,7 +69,11 @@ function decodeRevert(data: Hex | undefined): string {
   }
 }
 
-export function PotPanel({ compiled, sauceReady, sauceError, onPotFunded }: Props) {
+export function PotPanel({
+  compiled, sauceReady, sauceError, onPotFunded,
+  orders, ordersState, ordersError,
+  onSubmitOrder, onCancelOrder, onInvalidateOnchain,
+}: Props) {
   const { address, isConnected } = useAccount()
   const publicClient = usePublicClient({ chainId: TARGET_CHAIN_ID })
   const { data: rawWalletClient } = useWalletClient()
@@ -113,7 +118,7 @@ export function PotPanel({ compiled, sauceReady, sauceError, onPotFunded }: Prop
   // Live pool data (cirBTC price + quotes for slippage floors)
   const { reserve0: eurcR0, reserve1: eurcR1 } = usePoolReserves(MAINNET_ADDRESSES.POOL_USDC_EURC)
   const { reserve0: btcR0,  reserve1: btcR1  } = usePoolReserves(MAINNET_ADDRESSES.POOL_USDC_BTC)
-  const { eurcBps, btcBps } = useBasketAllocation()
+  const { eurcBps, btcBps, usdcBps } = useBasketAllocation()
   // USDC per whole cirBTC, 6 decimals — same formula the Sauce program checks onchain
   const btcPrice = btcR1 > 0n ? (btcR0 * 100_000_000n) / btcR1 : 0n
 
@@ -539,6 +544,24 @@ export function PotPanel({ compiled, sauceReady, sauceError, onPotFunded }: Prop
           </a>
         )}
 
+        {/* ── Auto-buy orders ──────────────────────────────────────────────── */}
+        {isConnected && potDeployed === true && (
+          <OrdersSection
+            orders={orders}
+            ordersState={ordersState}
+            ordersError={ordersError}
+            potUsdc={potUsdc}
+            btcPrice={btcPrice}
+            priceWhole={priceWhole}
+            btcBps={btcBps}
+            eurcBps={eurcBps}
+            usdcBps={usdcBps}
+            onSubmit={onSubmitOrder}
+            onCancel={onCancelOrder}
+            onInvalidate={onInvalidateOnchain}
+          />
+        )}
+
         <p className="text-xs mt-4" style={{ color: 'var(--muted)' }}>
           Executes only if the cirBTC price is at or below your limit. Powered by{' '}
           <a href="https://eco.com" target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>Eco Sauce</a>.
@@ -548,16 +571,218 @@ export function PotPanel({ compiled, sauceReady, sauceError, onPotFunded }: Prop
   )
 }
 
+// ─── OrdersSection ───────────────────────────────────────────────────────────
+
+interface OrdersSectionProps {
+  orders:      SignedOrder[]
+  ordersState: string
+  ordersError: string | null
+  potUsdc:     bigint
+  btcPrice:    bigint
+  priceWhole:  bigint
+  btcBps:      number
+  eurcBps:     number
+  usdcBps:     number
+  onSubmit:    (amt: bigint, price: bigint, label: string) => Promise<boolean>
+  onCancel:    (nonce: string) => Promise<boolean>
+  onInvalidate:(nonce: bigint) => Promise<Hex | null>
+}
+
+function OrdersSection({
+  orders, ordersState, ordersError, potUsdc,
+  btcPrice, priceWhole, btcBps, eurcBps, usdcBps,
+  onSubmit, onCancel, onInvalidate,
+}: OrdersSectionProps) {
+  const [orderAmt,   setOrderAmt]   = useState('')
+  const [orderPrice, setOrderPrice] = useState('')
+  const [invalidatingNonce, setInvalidatingNonce] = useState<string | null>(null)
+  // Initialised once at mount — avoids calling Date.now() during re-renders
+  const [nowSec] = useState(() => Math.floor(Date.now() / 1000))
+
+  let orderAmtRaw   = 0n
+  let orderPriceRaw = 0n
+  try { orderAmtRaw   = orderAmt   ? parseUnits(orderAmt,   6) : 0n } catch { orderAmtRaw   = 0n }
+  try { orderPriceRaw = orderPrice ? parseUnits(orderPrice, 6) : 0n } catch { orderPriceRaw = 0n }
+
+  const totalLocked = orders.reduce((acc, o) => acc + BigInt(o.usdcAmount), 0n)
+  const feeHeadroom = 20_000_000n // 20 USDC headroom for Kitchen fees
+  const potLow = potUsdc < totalLocked + orderAmtRaw + feeHeadroom
+
+  const canSign = ordersState === 'idle' && orders.length < 3
+    && orderAmtRaw > 0n && orderPriceRaw > 0n && !potLow
+
+  async function handleSign() {
+    const label = `${String(orderPriceRaw / 1_000_000n)} USDC/cirBTC`
+    const ok = await onSubmit(orderAmtRaw, orderPriceRaw, label)
+    if (ok) { setOrderAmt(''); setOrderPrice('') }
+  }
+
+  async function handleInvalidate(nonce: string) {
+    setInvalidatingNonce(nonce)
+    await onInvalidate(BigInt(nonce))
+    setInvalidatingNonce(null)
+  }
+
+  const glass2 = { background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.09)', borderRadius: '14px' }
+
+  return (
+    <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-xs font-semibold" style={{ color: 'var(--ink-2)' }}>Auto-buy orders</span>
+        <span className="text-xs" style={{ color: 'var(--subtle)' }}>{orders.length}/3 active</span>
+      </div>
+
+      {/* Bot label */}
+      <p className="text-xs mb-3" style={{ color: 'var(--subtle)' }}>
+        Executed by Trivo bot{' '}
+        <span className="font-mono" style={{ color: 'var(--accent)' }}>
+          {BOT_ADDRESS.slice(0, 8)}…{BOT_ADDRESS.slice(-4)}
+        </span>
+        . Signs an order now; the bot submits it only when the price condition is met.
+      </p>
+
+      {ordersError && (
+        <div className="flex items-start gap-2 text-xs mb-3 p-2 rounded-lg"
+          style={{ background: 'rgba(239,68,68,0.12)', color: 'var(--danger)', border: '1px solid rgba(239,68,68,0.2)' }}>
+          <AlertCircle className="size-3.5 shrink-0 mt-0.5" />
+          <span className="break-all">{ordersError}</span>
+        </div>
+      )}
+
+      {/* New order form */}
+      {orders.length < 3 && (
+        <div style={glass2} className="p-3 mb-3 space-y-2">
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <p className="text-xs mb-1" style={{ color: 'var(--subtle)' }}>Amount (USDC)</p>
+              <input
+                inputMode="decimal" value={orderAmt}
+                onChange={e => setOrderAmt(e.target.value.replace(',', '.').replace(/[^0-9.]/g, ''))}
+                placeholder="0.00"
+                className="w-full bg-transparent text-sm font-bold tabular-nums outline-none"
+                style={{ color: 'var(--ink)' }} />
+            </div>
+            <div className="flex-1">
+              <p className="text-xs mb-1" style={{ color: 'var(--subtle)' }}>
+                Buy if cirBTC ≤ (USDC)
+              </p>
+              <div className="flex items-center gap-1">
+                <input
+                  inputMode="numeric" value={orderPrice}
+                  onChange={e => setOrderPrice(e.target.value.replace(/[^0-9]/g, ''))}
+                  placeholder={btcPrice > 0n ? String(priceWhole) : '0'}
+                  className="flex-1 bg-transparent text-sm font-bold tabular-nums outline-none"
+                  style={{ color: 'var(--ink)' }} />
+                <button onClick={() => setOrderPrice(String(priceWhole))} disabled={btcPrice === 0n}
+                  className="text-xs shrink-0 transition-opacity hover:opacity-80 disabled:opacity-40"
+                  style={{ color: 'var(--accent)' }}>now</button>
+              </div>
+            </div>
+          </div>
+
+          {/* Allocation breakdown — shown when amount is entered */}
+          {orderAmtRaw > 0n && (
+            <p className="text-xs" style={{ color: 'var(--subtle)' }}>
+              <span style={{ color: 'var(--ink)' }}>{(btcBps / 100).toFixed(0)}%</span> buys cirBTC ·{' '}
+              <span style={{ color: 'var(--ink)' }}>{(eurcBps / 100).toFixed(0)}%</span> buys EURC ·{' '}
+              <span style={{ color: 'var(--ink)' }}>{(usdcBps / 100).toFixed(0)}%</span> stays USDC
+            </p>
+          )}
+
+          {potLow && orderAmtRaw > 0n && (
+            <p className="text-xs" style={{ color: 'var(--warning, #f59e0b)' }}>
+              Pot balance may be insufficient. Add funds to cover this order plus fee headroom.
+            </p>
+          )}
+
+          <button
+            onClick={() => { void handleSign() }}
+            disabled={!canSign}
+            className="w-full py-2.5 rounded-xl text-xs font-bold transition-opacity disabled:opacity-40"
+            style={{ background: 'var(--accent)', color: '#0d1b2f' }}>
+            {ordersState === 'signing'    ? 'Sign in wallet…' :
+             ordersState === 'submitting' ? 'Submitting…' :
+             'Sign order (no gas)'}
+          </button>
+          <p className="text-xs text-center" style={{ color: 'var(--subtle)' }}>Valid 7 days · up to 3 orders</p>
+        </div>
+      )}
+
+      {/* Active order list */}
+      {orders.length === 0 ? (
+        <p className="text-xs text-center py-3" style={{ color: 'var(--subtle)' }}>No active orders.</p>
+      ) : (
+        <div className="space-y-2">
+          {orders.map(o => {
+            const deadlineSec = Number(o.deadline)
+            const daysLeft    = Math.max(0, Math.floor((deadlineSec - nowSec) / 86400))
+            return (
+              <div key={o.nonce} style={glass2} className="p-3 flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold truncate" style={{ color: 'var(--ink)' }}>
+                    {formatUnits(BigInt(o.usdcAmount), 6, 2)} USDC → cirBTC ≤ {o.targetPriceLabel}
+                  </p>
+                  <p className="text-xs flex items-center gap-1 mt-0.5" style={{ color: 'var(--subtle)' }}>
+                    <Clock className="size-3" />{daysLeft}d left
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {/* Off-chain cancel (removes from storage, nonce still valid onchain until used or expired) */}
+                  <button
+                    onClick={() => { void onCancel(o.nonce) }}
+                    disabled={ordersState === 'cancelling'}
+                    title="Remove order"
+                    className="transition-opacity hover:opacity-80 disabled:opacity-40"
+                    style={{ color: 'var(--subtle)' }}>
+                    <X className="size-3.5" />
+                  </button>
+                  {/* Onchain invalidation: burns the nonce in the Pot contract */}
+                  <button
+                    onClick={() => { void handleInvalidate(o.nonce) }}
+                    disabled={invalidatingNonce === o.nonce}
+                    title="Burn nonce onchain (prevents bot from ever executing)"
+                    className="text-xs transition-opacity hover:opacity-80 disabled:opacity-40"
+                    style={{ color: 'var(--danger)' }}>
+                    {invalidatingNonce === o.nonce ? '…' : 'Burn'}
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── LimitBuyTab ─────────────────────────────────────────────────────────────
+
 // Limit Buy tab: loads the Sauce compiler and renders the panel
 export function LimitBuyTab() {
   const { compiled, sauceReady, sauceError } = useSauce()
   const { triggerRefresh } = useRefresh()
+
+  // Allocation + pool data for computeMins
+  const { eurcBps, btcBps, usdcBps: _usdcBps } = useBasketAllocation()
+  const { reserve0: eurcR0, reserve1: eurcR1 } = usePoolReserves(MAINNET_ADDRESSES.POOL_USDC_EURC)
+
+  const {
+    orders, state: ordersState, error: ordersError,
+    submitOrder, cancelOrder, invalidateOnchain,
+  } = useOrders(compiled, btcBps, eurcBps, eurcR0, eurcR1)
+
   return (
     <PotPanel
       compiled={compiled}
       sauceReady={sauceReady}
       sauceError={sauceError}
       onPotFunded={() => triggerRefresh()}
+      orders={orders}
+      ordersState={ordersState}
+      ordersError={ordersError}
+      onSubmitOrder={submitOrder}
+      onCancelOrder={cancelOrder}
+      onInvalidateOnchain={invalidateOnchain}
     />
   )
 }

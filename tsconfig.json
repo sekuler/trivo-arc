@@ -31,10 +31,12 @@
       ]
     }
   },
-  "include": ["src", "scripts"],
+  "include": ["src", "scripts", "api"],
   "exclude": [
     "src/sauce/conditionalBasket.sauce.ts",
-    "src/sauce/withdrawFromPot.sauce.ts"
+    "src/sauce/withdrawFromPot.sauce.ts",
+    "src/sauce/compile-simulate.mts",
+    "src/sauce/verify-onchain.mts"
   ]
 }
 

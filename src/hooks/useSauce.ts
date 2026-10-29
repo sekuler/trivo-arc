@@ -31,9 +31,11 @@ import { bytesToHex, concatHex, type Hex } from 'viem'
 import basketPoolAbiJson from '../sauce/BasketPool.abi.json'
 import basketAbiJson     from '../sauce/Basket.abi.json'
 
-// Sauce program sources — imported as raw strings by Vite
-import conditionalBasketSrc from '../sauce/conditionalBasket.sauce.ts?raw'
-import withdrawFromPotSrc   from '../sauce/withdrawFromPot.sauce.ts?raw'
+// conditionalBasket source from the shared string-constant module (same source
+// the API route compiles server-side, ensuring bytecode identity)
+import { CONDITIONAL_BASKET_SOURCE } from '../sauce/conditionalBasket.source'
+// withdrawFromPot has no server-side compile path — keep as raw import
+import withdrawFromPotSrc from '../sauce/withdrawFromPot.sauce.ts?raw'
 
 export const KITCHEN = v12KitchenAddress() as Hex
 export const ENGINE  = v12EngineAddress()  as Hex
@@ -67,7 +69,7 @@ async function compileAll(): Promise<CompiledPrograms> {
     await ready(new URL('/sauce_wasm_bg.wasm', location.href))
 
     const opts = { resolve: resolveAbi }
-    const conditionalBasket = routes.compileSauceProgram('arc', conditionalBasketSrc, opts)
+    const conditionalBasket = routes.compileSauceProgram('arc', CONDITIONAL_BASKET_SOURCE, opts)
     const withdrawFromPot   = routes.compileSauceProgram('arc', withdrawFromPotSrc)
 
     _compiled = { conditionalBasket, withdrawFromPot }
