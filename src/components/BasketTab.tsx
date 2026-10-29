@@ -3,10 +3,12 @@ import { useAccount, useWriteContract, useWaitForTransactionReceipt, useSwitchCh
 import { erc20Abi } from 'viem'
 import { toast } from 'sonner'
 import { Loader2, ChevronDown, ExternalLink, AlertCircle, CheckCircle2 } from 'lucide-react'
-import { BASKET_ABI, getAddresses, TARGET_CHAIN_ID, TARGET_CHAIN, GAS_FALLBACK } from '../contracts'
+import { BASKET_ABI, getAddresses, TARGET_CHAIN_ID, TARGET_CHAIN, GAS_FALLBACK, IS_MAINNET } from '../contracts'
 import { TokenLogo } from './TokenLogo'
 import { estimateGas } from '../estimateGas'
 import { GatewaySection } from './GatewaySection'
+import { PotPanel } from './PotPanel'
+import { useSauce } from '../hooks/useSauce'
 import { useBasketPosition, useBasketAllocation, useTokenBalances, usePoolReserves } from '../hooks/useContracts'
 import { useRefresh } from '../context/RefreshContext'
 import { formatUnits, parseUnitsStrict, formatUsd, slippageFactor, calcPriceImpactBps } from '../utils/format'
@@ -37,6 +39,7 @@ export function BasketTab() {
   const { chainId, isConnected, address } = useAccount()
   const { switchChain } = useSwitchChain()
   const publicClient = usePublicClient({ chainId: TARGET_CHAIN_ID })
+  const { compiled, sauceReady, sauceError } = useSauce()
   const addrs    = getAddresses(TARGET_CHAIN_ID)
   const wrongChain = isConnected && chainId !== TARGET_CHAIN_ID
   const { triggerRefresh } = useRefresh()
@@ -741,7 +744,7 @@ export function BasketTab() {
       {/* ── End left column ── */}
       </div>
 
-      {/* ── Right column: Gateway ── */}
+      {/* ── Right column: Gateway + Pot ── */}
       <div>
         <GatewaySection
           onUsdcArrivedOnArc={(amt) => {
@@ -750,6 +753,14 @@ export function BasketTab() {
             toast.success(`${parseFloat(amt).toFixed(2)} USDC arriving on Arc — deposit to basket!`, { duration: 6000 })
           }}
         />
+        {IS_MAINNET && (
+          <PotPanel
+            compiled={compiled}
+            sauceReady={sauceReady}
+            sauceError={sauceError}
+            onPotFunded={() => triggerRefresh()}
+          />
+        )}
       </div>
 
     </div>

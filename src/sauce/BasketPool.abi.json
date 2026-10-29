@@ -1,0 +1,12 @@
+[
+  {
+    "type": "function",
+    "name": "getReserves",
+    "inputs": [],
+    "outputs": [
+      { "name": "reserve0", "type": "uint256" },
+      { "name": "reserve1", "type": "uint256" }
+    ],
+    "stateMutability": "view"
+  }
+]

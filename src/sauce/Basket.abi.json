@@ -1,0 +1,14 @@
+[
+  {
+    "type": "function",
+    "name": "depositUsdcFor",
+    "inputs": [
+      { "name": "recipient", "type": "address" },
+      { "name": "usdcAmount", "type": "uint256" },
+      { "name": "minEurc", "type": "uint256" },
+      { "name": "minBtc", "type": "uint256" }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  }
+]
