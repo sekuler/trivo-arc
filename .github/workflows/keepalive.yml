@@ -1,0 +1,34 @@
+name: Keepalive
+
+# GitHub automatically disables scheduled workflows (like bot-runner.yml) after
+# 60 days without any repository activity. This workflow runs once a month and
+# commits an empty keepalive file to keep the repo active and the bot running.
+#
+# Required permission: the default GITHUB_TOKEN needs "contents: write".
+# In your repo settings: Settings → Actions → General → Workflow permissions
+# → select "Read and write permissions".
+
+on:
+  schedule:
+    # 1st of every month at 06:00 UTC
+    - cron: '0 6 1 * *'
+  workflow_dispatch:
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Touch keepalive file
+        run: |
+          echo "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .github/keepalive
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .github/keepalive
+          git diff --cached --quiet || git commit -m "chore: keepalive [skip ci]"
+          git push
