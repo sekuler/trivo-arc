@@ -20,6 +20,14 @@
   --accent-hover: #cbdbf2;
   --success: #8dd89f;
   --danger: #e86d7a;
+  /* Brand gradient — purple to cyan (from the Trivo logo) */
+  --brand-from: #8B5CF6;
+  --brand-to:   #22D3EE;
+  --brand-grad: linear-gradient(90deg, #8B5CF6 0%, #22D3EE 100%);
+  --brand-glow: 0 0 18px rgba(139,92,246,0.35), 0 0 36px rgba(34,211,238,0.2);
+  --brand-glow-hover: 0 0 22px rgba(139,92,246,0.55), 0 0 44px rgba(34,211,238,0.3);
+  /* Section label gold */
+  --label-gold: #F5C26B;
 }
 
 * {
@@ -92,4 +100,50 @@ body {
 @keyframes glow-drift-c {
   0%   { transform: translateX(-50%) scale(1); }
   100% { transform: translateX(calc(-50% + 40px)) scale(1.12); }
+}
+
+/* ── Brand components ──────────────────────────────────────────────── */
+
+/* Primary action button: purple→cyan gradient with soft glow */
+.btn-brand {
+  background: var(--brand-grad);
+  color: #fff;
+  font-weight: 700;
+  box-shadow: var(--brand-glow);
+  transition: opacity 0.15s, box-shadow 0.15s;
+}
+.btn-brand:hover:not(:disabled) {
+  opacity: 0.92;
+  box-shadow: var(--brand-glow-hover);
+}
+.btn-brand:disabled {
+  background: rgba(148, 163, 184, 0.25);
+  color: rgba(148, 163, 184, 0.6);
+  box-shadow: none;
+}
+
+/* Section label: warm gold, uppercase, wide tracking */
+.section-label {
+  color: var(--label-gold) !important;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* Card with subtle gradient border glow */
+.card-glow {
+  background: rgba(255,255,255,0.07);
+  backdrop-filter: blur(20px);
+  border: 1px solid transparent;
+  background-clip: padding-box;
+  box-shadow: 0 0 0 1px rgba(139,92,246,0.18), 0 0 0 1px rgba(34,211,238,0.10), inset 0 0 0 1px rgba(255,255,255,0.06);
+  border-radius: 24px;
+}
+
+/* Active tab / selected chip: brand gradient text + border */
+.chip-brand {
+  background: rgba(139,92,246,0.15);
+  border: 1px solid rgba(139,92,246,0.35);
+  color: #c4b5fd;
 }

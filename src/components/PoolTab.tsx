@@ -423,8 +423,8 @@ function PoolCard({ pool }: { pool: Pool }) {
             <span className="text-xs" style={{ color: 'var(--subtle)' }}>Slippage</span>
             {[25, 50, 100].map((bps) => (
               <button key={bps} onClick={() => setSlipBps(bps)}
-                className="text-xs px-2.5 py-1 rounded-lg font-semibold transition-colors"
-                style={{ background: slipBps === bps ? 'var(--accent)' : 'rgba(255,255,255,0.07)', color: slipBps === bps ? '#0d1b2f' : 'var(--muted)' }}>
+                className={`text-xs px-2.5 py-1 rounded-lg font-semibold transition-colors ${slipBps === bps ? 'chip-brand' : ''}`}
+                style={slipBps !== bps ? { background: 'rgba(255,255,255,0.07)', color: 'var(--muted)' } : undefined}>
                 {(bps / 100).toFixed(2)}%
               </button>
             ))}
@@ -453,8 +453,7 @@ function PoolCard({ pool }: { pool: Pool }) {
           <button
             disabled={!isConnected || wrongChain || busyAddAny || !usdcAmt || !tokenAmt || parseUnitsStrict(usdcAmt, 6) === 0n}
             onClick={wrongChain ? () => switchChain({ chainId: TARGET_CHAIN_ID }) : handleAdd}
-            className="w-full rounded-2xl py-3.5 text-sm font-semibold transition-all hover:scale-[1.01] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40"
-            style={{ background: 'var(--accent)', color: '#0d1b2f' }}>
+            className="w-full rounded-2xl py-3.5 text-sm font-semibold transition-all hover:scale-[1.01] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40 btn-brand">
             {!isConnected ? 'Connect Wallet'
               : wrongChain ? 'Switch Network'
               : busyAddAny ? (
@@ -500,8 +499,8 @@ function PoolCard({ pool }: { pool: Pool }) {
             <span className="text-xs" style={{ color: 'var(--subtle)' }}>Slippage</span>
             {[25, 50, 100].map((bps) => (
               <button key={bps} onClick={() => setSlipBps(bps)}
-                className="text-xs px-2.5 py-1 rounded-lg font-semibold transition-colors"
-                style={{ background: slipBps === bps ? 'var(--accent)' : 'rgba(255,255,255,0.07)', color: slipBps === bps ? '#0d1b2f' : 'var(--muted)' }}>
+                className={`text-xs px-2.5 py-1 rounded-lg font-semibold transition-colors ${slipBps === bps ? 'chip-brand' : ''}`}
+                style={slipBps !== bps ? { background: 'rgba(255,255,255,0.07)', color: 'var(--muted)' } : undefined}>
                 {(bps / 100).toFixed(2)}%
               </button>
             ))}

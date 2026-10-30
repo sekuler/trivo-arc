@@ -329,7 +329,7 @@ export function BasketTab() {
       {/* ── Holdings card ── */}
       <div style={glass.card} className="p-5">
         <div className="flex items-center justify-between mb-4">
-          <span className="text-xs font-semibold tracking-widest uppercase" style={{ color: 'var(--subtle)' }}>Your Basket</span>
+          <span className="section-label">Your Basket</span>
           {hasPosition && (
             <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ background: 'rgba(141,216,159,0.15)', color: 'var(--success)' }}>Active</span>
           )}
@@ -482,8 +482,8 @@ export function BasketTab() {
           <span className="text-xs" style={{ color: 'var(--subtle)' }}>Slippage</span>
           {[50, 100, 200].map((bps) => (
             <button key={bps} onClick={() => setSlipBps(bps)}
-              className="text-xs px-2.5 py-1 rounded-lg font-semibold"
-              style={{ background: slipBps === bps ? 'var(--accent)' : 'rgba(255,255,255,0.07)', color: slipBps === bps ? '#0d1b2f' : 'var(--muted)' }}>
+              className={`text-xs px-2.5 py-1 rounded-lg font-semibold ${slipBps === bps ? 'chip-brand' : ''}`}
+              style={slipBps !== bps ? { background: 'rgba(255,255,255,0.07)', color: 'var(--muted)' } : undefined}>
               {(bps / 100).toFixed(2)}%
             </button>
           ))}
@@ -534,8 +534,8 @@ export function BasketTab() {
         <button
           disabled={!isConnected || (busyAny && !wrongChain) || (!wrongChain && (!depositAmt || Number(depositAmt) <= 0 || !bothPoolsOk))}
           onClick={wrongChain ? () => switchChain({ chainId: TARGET_CHAIN_ID }) : handleDeposit}
-          className="w-full rounded-2xl py-3.5 text-sm font-semibold transition-all hover:scale-[1.01] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40"
-          style={{ background: wrongChain ? 'rgba(172,198,233,0.2)' : 'var(--accent)', color: wrongChain ? 'var(--accent)' : '#0d1b2f', border: wrongChain ? '1px solid rgba(172,198,233,0.35)' : 'none' }}>
+          className={`w-full rounded-2xl py-3.5 text-sm font-semibold transition-all hover:scale-[1.01] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40 ${!wrongChain ? 'btn-brand' : ''}`}
+          style={wrongChain ? { background: 'rgba(172,198,233,0.2)', color: 'var(--accent)', border: '1px solid rgba(172,198,233,0.35)' } : undefined}>
           {!isConnected ? 'Connect Wallet'
             : wrongChain ? `⇄ Switch to ${TARGET_CHAIN.name}`
             : busyAny

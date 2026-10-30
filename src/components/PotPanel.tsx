@@ -129,6 +129,12 @@ export function PotPanel({
   const minEurc = (ammQuote((buyAmt * BigInt(eurcBps)) / 10000n, eurcR0, eurcR1) * (10000n - BUY_SLIPPAGE_BPS)) / 10000n
   const minBtc  = (ammQuote((buyAmt * BigInt(btcBps))  / 10000n, btcR0,  btcR1)  * (10000n - BUY_SLIPPAGE_BPS)) / 10000n
   const conditionMet = btcPrice > 0n && maxPriceRaw > 0n && btcPrice <= maxPriceRaw
+  const priceWholeNum = btcPrice > 0n ? Number(btcPrice / 1_000_000n) : 0
+
+  // Prefill maxPrice with current price when price first loads
+  useEffect(() => {
+    if (priceWholeNum > 0 && !maxPrice) setMaxPrice(String(priceWholeNum))
+  }, [priceWholeNum, maxPrice])
 
   // ── Derive & verify Pot ──────────────────────────────────────────────────────
   const refreshPot = useCallback(async () => {
@@ -407,8 +413,7 @@ export function PotPanel({
             <button
               onClick={() => { void handleDeploy() }}
               disabled={deployStep !== 'idle' || !sauceReady}
-              className="w-full py-3.5 rounded-2xl text-sm font-bold transition-opacity disabled:opacity-40"
-              style={{ background: 'var(--accent)', color: '#0d1b2f' }}>
+              className="w-full py-3.5 rounded-2xl text-sm font-bold btn-brand disabled:opacity-40">
               {deployStep === 'idle'       && 'Create your Pot'}
               {deployStep === 'simulating' && 'Checking…'}
               {deployStep === 'sending'    && 'Creating…'}
@@ -424,10 +429,9 @@ export function PotPanel({
             <div style={glass.inner} className="p-4 mb-2">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs" style={{ color: 'var(--subtle)' }}>You spend (USDC)</span>
-                <button onClick={() => setBuyAmount(formatUnits(potUsdc, 6, 6))} disabled={potUsdc === 0n}
-                  className={linkBtn} style={{ color: 'var(--accent)' }}>
-                  Pot: {formatUnits(potUsdc, 6, 6)} Max
-                </button>
+                <span className="text-xs tabular-nums" style={{ color: 'var(--subtle)' }}>
+                  Pot: {formatUnits(potUsdc, 6, 2)} USDC
+                </span>
               </div>
               <input
                 inputMode="decimal" value={buyAmount}
@@ -435,37 +439,77 @@ export function PotPanel({
                 placeholder="0.00"
                 className="display w-full bg-transparent text-3xl font-bold tabular-nums outline-none placeholder:opacity-20"
                 style={inputStyle} />
+              {/* Quick-amount chips */}
+              <div className="flex flex-wrap gap-1.5 mt-3">
+                {[['25%', 0.25], ['50%', 0.5], ['MAX', 1]] .map(([label, frac]) => (
+                  <button key={String(label)}
+                    disabled={potUsdc === 0n}
+                    onClick={() => {
+                      const v = (potUsdc * BigInt(Math.round(Number(frac) * 10000))) / 10000n
+                      setBuyAmount(formatUnits(v, 6, 6))
+                    }}
+                    className="text-xs px-2.5 py-1 rounded-lg font-semibold transition-opacity hover:opacity-80 disabled:opacity-40"
+                    style={{ background: 'rgba(255,255,255,0.07)', color: 'var(--muted)' }}>
+                    {String(label)}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Max price */}
             <div style={glass.inner} className="p-4 mb-3">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs" style={{ color: 'var(--subtle)' }}>Buy only if cirBTC ≤ (USDC)</span>
-                <button onClick={() => setMaxPrice(String(priceWhole))} disabled={btcPrice === 0n}
-                  className={linkBtn} style={{ color: 'var(--accent)' }}>
-                  Use current
-                </button>
+                <span className="text-xs tabular-nums" style={{ color: 'var(--subtle)' }}>
+                  Now: {priceWholeNum > 0 ? priceWholeNum.toLocaleString('en-US') : '…'}
+                </span>
               </div>
               <input
                 inputMode="numeric" value={maxPrice}
                 onChange={e => setMaxPrice(e.target.value.replace(/[^0-9]/g, ''))}
-                placeholder={btcPrice > 0n ? String(priceWhole) : '0'}
                 className="display w-full bg-transparent text-3xl font-bold tabular-nums outline-none placeholder:opacity-20"
                 style={inputStyle} />
-              {maxPriceRaw > 0n && btcPrice > 0n && (
-                <div className="text-xs mt-2" style={{ color: conditionMet ? 'var(--success)' : 'var(--subtle)' }}>
-                  {conditionMet ? '✓ Condition met at the current price.' : 'Price is above your limit. The buy will not execute.'}
-                </div>
-              )}
+              {/* Price chips */}
+              <div className="flex flex-wrap gap-1.5 mt-3">
+                {([[-1, '-1%'], [-3, '-3%'], [-5, '-5%'], [-10, '-10%'], [0, 'Current']] as [number, string][]).map(([pct, lbl]) => (
+                  <button key={lbl}
+                    disabled={priceWholeNum === 0}
+                    onClick={() => setMaxPrice(String(Math.round(priceWholeNum * (1 + pct / 100))))}
+                    className="text-xs px-2.5 py-1 rounded-lg font-semibold transition-opacity hover:opacity-80 disabled:opacity-40"
+                    style={{ background: 'rgba(255,255,255,0.07)', color: 'var(--muted)' }}>
+                    {lbl}
+                  </button>
+                ))}
+              </div>
+              {maxPriceRaw > 0n && btcPrice > 0n && (() => {
+                const diffPct = priceWholeNum > 0 ? ((Number(maxPriceRaw / 1_000_000n) - priceWholeNum) / priceWholeNum * 100) : 0
+                const absDiff = Math.abs(diffPct).toFixed(1)
+                return (
+                  <p className="text-xs mt-2" style={{ color: conditionMet ? 'var(--success)' : 'var(--subtle)' }}>
+                    {conditionMet
+                      ? `✓ ${absDiff}% above current — condition met now.`
+                      : `${absDiff}% below current — waiting for price to drop.`}
+                  </p>
+                )
+              })()}
             </div>
+
+            {/* Add funds nudge — shown when pot balance is too low */}
+            {buyAmt > potUsdc && buyAmt > 0n && (
+              <button
+                onClick={() => setShowFund(true)}
+                className="w-full py-2.5 rounded-2xl text-sm font-semibold mb-2 transition-opacity hover:opacity-80"
+                style={{ background: 'rgba(245,194,107,0.12)', color: 'var(--label-gold)', border: '1px solid rgba(245,194,107,0.25)' }}>
+                Add funds to your Pot first
+              </button>
+            )}
 
             {/* Buy */}
             <button
               onClick={() => { void handleConditionalBuy() }}
               disabled={buyDisabled}
-              className="w-full py-3.5 rounded-2xl text-sm font-bold transition-opacity disabled:opacity-40"
-              style={{ background: 'var(--accent)', color: '#0d1b2f' }}>
-              {buyStep === 'idle'       && (buyAmt > potUsdc ? 'Add funds to your Pot first' : 'Buy basket')}
+              className="w-full py-3.5 rounded-2xl text-sm font-bold btn-brand disabled:opacity-40">
+              {buyStep === 'idle'       && 'Buy basket'}
               {buyStep === 'simulating' && 'Checking price…'}
               {buyStep === 'sending'    && 'Buying…'}
               {buyStep === 'done'       && '✓ Basket bought'}
@@ -511,8 +555,7 @@ export function PotPanel({
                   style={{ border: '1px solid var(--border)', color: 'var(--ink)' }} />
                 <button onClick={() => { void handleFund() }}
                   disabled={fundStep !== 'idle' || !sauceReady}
-                  className="rounded-xl px-4 py-2 text-xs font-bold transition-opacity disabled:opacity-40"
-                  style={{ background: 'var(--accent)', color: '#0d1b2f' }}>
+                  className="rounded-xl px-4 py-2 text-xs font-bold btn-brand disabled:opacity-40">
                   {fundStep === 'idle' ? 'Add to Pot' : fundStep === 'done' ? '✓ Added' : 'Adding…'}
                 </button>
               </div>
@@ -596,8 +639,16 @@ function OrdersSection({
   const [orderAmt,   setOrderAmt]   = useState('')
   const [orderPrice, setOrderPrice] = useState('')
   const [invalidatingNonce, setInvalidatingNonce] = useState<string | null>(null)
-  // Initialised once at mount — avoids calling Date.now() during re-renders
   const [nowSec] = useState(() => Math.floor(Date.now() / 1000))
+
+  const priceWholeNum = btcPrice > 0n ? Number(priceWhole) : 0
+
+  // Prefill order price at current price -3% when price first loads
+  useEffect(() => {
+    if (priceWholeNum > 0 && !orderPrice) {
+      setOrderPrice(String(Math.round(priceWholeNum * 0.97)))
+    }
+  }, [priceWholeNum, orderPrice])
 
   let orderAmtRaw   = 0n
   let orderPriceRaw = 0n
@@ -605,9 +656,8 @@ function OrdersSection({
   try { orderPriceRaw = orderPrice ? parseUnits(orderPrice, 6) : 0n } catch { orderPriceRaw = 0n }
 
   const totalLocked = orders.reduce((acc, o) => acc + BigInt(o.usdcAmount), 0n)
-  // Kitchen fee headroom: each cook may cost up to its signed maxExecutionFee (2x the 0.01 USDC fee).
-  // USDC on Arc is the native gas token, so the Pot pays it from the same USDC balance (6-dec here).
-  const feeHeadroom = BigInt(orders.length + 1) * 20_000n // 0.02 USDC per order
+  const feeHeadroom = BigInt(orders.length + 1) * 20_000n
+  const available   = potUsdc > totalLocked + feeHeadroom ? potUsdc - totalLocked - feeHeadroom : 0n
   const potLow = potUsdc < totalLocked + orderAmtRaw + feeHeadroom
 
   const canSign = ordersState === 'idle' && orders.length < 3
@@ -626,6 +676,12 @@ function OrdersSection({
   }
 
   const glass2 = { background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.09)', borderRadius: '14px' }
+  const chipStyle = { background: 'rgba(255,255,255,0.07)', color: 'var(--muted)' }
+
+  // % difference between order price and current price
+  const orderPriceDiffPct = priceWholeNum > 0 && orderPriceRaw > 0n
+    ? ((Number(orderPriceRaw / 1_000_000n) - priceWholeNum) / priceWholeNum * 100)
+    : null
 
   return (
     <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
@@ -653,36 +709,71 @@ function OrdersSection({
 
       {/* New order form */}
       {orders.length < 3 && (
-        <div style={glass2} className="p-3 mb-3 space-y-2">
-          <div className="flex gap-2">
-            <div className="flex-1">
-              <p className="text-xs mb-1" style={{ color: 'var(--subtle)' }}>Amount (USDC)</p>
-              <input
-                inputMode="decimal" value={orderAmt}
-                onChange={e => setOrderAmt(e.target.value.replace(',', '.').replace(/[^0-9.]/g, ''))}
-                placeholder="0.00"
-                className="w-full bg-transparent text-sm font-bold tabular-nums outline-none"
-                style={{ color: 'var(--ink)' }} />
+        <div style={glass2} className="p-4 mb-3 space-y-3">
+          {/* Amount */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-xs" style={{ color: 'var(--subtle)' }}>Amount (USDC)</p>
+              <span className="text-xs tabular-nums" style={{ color: 'var(--subtle)' }}>
+                Available: {formatUnits(available, 6, 2)}
+              </span>
             </div>
-            <div className="flex-1">
-              <p className="text-xs mb-1" style={{ color: 'var(--subtle)' }}>
-                Buy if cirBTC ≤ (USDC)
-              </p>
-              <div className="flex items-center gap-1">
-                <input
-                  inputMode="numeric" value={orderPrice}
-                  onChange={e => setOrderPrice(e.target.value.replace(/[^0-9]/g, ''))}
-                  placeholder={btcPrice > 0n ? String(priceWhole) : '0'}
-                  className="flex-1 bg-transparent text-sm font-bold tabular-nums outline-none"
-                  style={{ color: 'var(--ink)' }} />
-                <button onClick={() => setOrderPrice(String(priceWhole))} disabled={btcPrice === 0n}
-                  className="text-xs shrink-0 transition-opacity hover:opacity-80 disabled:opacity-40"
-                  style={{ color: 'var(--accent)' }}>now</button>
-              </div>
+            <input
+              inputMode="decimal" value={orderAmt}
+              onChange={e => setOrderAmt(e.target.value.replace(',', '.').replace(/[^0-9.]/g, ''))}
+              placeholder="0.00"
+              className="display w-full bg-transparent text-2xl font-bold tabular-nums outline-none placeholder:opacity-20"
+              style={{ color: 'var(--ink)' }} />
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {[['25%', 0.25], ['50%', 0.5], ['MAX', 1]].map(([lbl, frac]) => (
+                <button key={String(lbl)}
+                  disabled={available === 0n}
+                  onClick={() => {
+                    const v = (available * BigInt(Math.round(Number(frac) * 10000))) / 10000n
+                    setOrderAmt(formatUnits(v, 6, 6))
+                  }}
+                  className="text-xs px-2.5 py-1 rounded-lg font-semibold transition-opacity hover:opacity-80 disabled:opacity-40"
+                  style={chipStyle}>
+                  {String(lbl)}
+                </button>
+              ))}
             </div>
           </div>
 
-          {/* Allocation breakdown — shown when amount is entered */}
+          {/* Price */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-xs" style={{ color: 'var(--subtle)' }}>Buy if cirBTC ≤ (USDC)</p>
+              <span className="text-xs tabular-nums" style={{ color: 'var(--subtle)' }}>
+                Now: {priceWholeNum > 0 ? priceWholeNum.toLocaleString('en-US') : '…'}
+              </span>
+            </div>
+            <input
+              inputMode="numeric" value={orderPrice}
+              onChange={e => setOrderPrice(e.target.value.replace(/[^0-9]/g, ''))}
+              className="display w-full bg-transparent text-2xl font-bold tabular-nums outline-none placeholder:opacity-20"
+              style={{ color: 'var(--ink)' }} />
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {([[-1, '-1%'], [-3, '-3%'], [-5, '-5%'], [-10, '-10%']] as [number, string][]).map(([pct, lbl]) => (
+                <button key={lbl}
+                  disabled={priceWholeNum === 0}
+                  onClick={() => setOrderPrice(String(Math.round(priceWholeNum * (1 + pct / 100))))}
+                  className="text-xs px-2.5 py-1 rounded-lg font-semibold transition-opacity hover:opacity-80 disabled:opacity-40"
+                  style={chipStyle}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
+            {orderPriceDiffPct !== null && (
+              <p className="text-xs mt-1.5" style={{ color: 'var(--subtle)' }}>
+                {orderPriceDiffPct >= 0
+                  ? `${orderPriceDiffPct.toFixed(1)}% above current price`
+                  : `${Math.abs(orderPriceDiffPct).toFixed(1)}% below current price`}
+              </p>
+            )}
+          </div>
+
+          {/* Allocation breakdown */}
           {orderAmtRaw > 0n && (
             <p className="text-xs" style={{ color: 'var(--subtle)' }}>
               <span style={{ color: 'var(--ink)' }}>{(btcBps / 100).toFixed(0)}%</span> buys cirBTC ·{' '}
@@ -691,17 +782,20 @@ function OrdersSection({
             </p>
           )}
 
+          {/* Add funds nudge */}
           {potLow && orderAmtRaw > 0n && (
-            <p className="text-xs" style={{ color: 'var(--warning, #f59e0b)' }}>
-              Pot balance may be insufficient. Add funds to cover this order plus fee headroom.
-            </p>
+            <button
+              onClick={() => { /* scroll up to show fund form */ }}
+              className="w-full py-2 rounded-xl text-xs font-semibold transition-opacity hover:opacity-80"
+              style={{ background: 'rgba(245,194,107,0.12)', color: 'var(--label-gold)', border: '1px solid rgba(245,194,107,0.25)' }}>
+              Add funds to your Pot first
+            </button>
           )}
 
           <button
             onClick={() => { void handleSign() }}
             disabled={!canSign}
-            className="w-full py-2.5 rounded-xl text-xs font-bold transition-opacity disabled:opacity-40"
-            style={{ background: 'var(--accent)', color: '#0d1b2f' }}>
+            className="w-full py-2.5 rounded-xl text-sm font-bold btn-brand disabled:opacity-40">
             {ordersState === 'signing'    ? 'Sign in wallet…' :
              ordersState === 'submitting' ? 'Submitting…' :
              'Sign order (no gas)'}

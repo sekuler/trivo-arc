@@ -513,12 +513,8 @@ export function StreamTab() {
           <div className="grid grid-cols-4 gap-2">
             {DURATIONS.map(d => (
               <button key={d.value} onClick={() => setDuration(d.value)} disabled={busyStart}
-                className="py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-50"
-                style={{
-                  background: duration === d.value ? 'rgba(172,198,233,0.18)' : 'rgba(255,255,255,0.05)',
-                  color:      duration === d.value ? 'var(--accent)' : 'var(--subtle)',
-                  border:     duration === d.value ? '1px solid rgba(172,198,233,0.3)' : '1px solid rgba(255,255,255,0.07)',
-                }}>
+                className={`py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-50 ${duration === d.value ? 'chip-brand' : ''}`}
+                style={duration !== d.value ? { background: 'rgba(255,255,255,0.05)', color: 'var(--subtle)', border: '1px solid rgba(255,255,255,0.07)' } : undefined}>
                 {d.display}
               </button>
             ))}
@@ -574,8 +570,8 @@ export function StreamTab() {
 
         <button disabled={!canStart || busyStart}
           onClick={wrongChain ? () => switchChain({ chainId: TARGET_CHAIN_ID }) : handleStart}
-          className="w-full rounded-2xl py-3.5 text-sm font-semibold transition-all hover:scale-[1.01] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40"
-          style={{ background: wrongChain ? 'rgba(172,198,233,0.2)' : 'var(--accent)', color: wrongChain ? 'var(--accent)' : '#0d1b2f', border: wrongChain ? '1px solid rgba(172,198,233,0.35)' : 'none' }}>
+          className={`w-full rounded-2xl py-3.5 text-sm font-semibold transition-all hover:scale-[1.01] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40 ${!wrongChain ? 'btn-brand' : ''}`}
+          style={wrongChain ? { background: 'rgba(172,198,233,0.2)', color: 'var(--accent)', border: '1px solid rgba(172,198,233,0.35)' } : undefined}>
           {!isConnected ? 'Connect wallet'
             : wrongChain ? `⇄ Switch to ${TARGET_CHAIN.name}`
             : busyStart

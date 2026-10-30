@@ -244,8 +244,7 @@ export function GatewaySection({ onUsdcArrivedOnArc }: GatewaySectionProps) {
                           <button
                             disabled={busy}
                             onClick={() => { void handleSpend(balance, chain) }}
-                            className="text-xs px-2 py-0.5 rounded-lg font-semibold disabled:opacity-40 transition-colors"
-                            style={{ background: 'rgba(172,198,233,0.15)', color: 'var(--accent)', border: '1px solid rgba(172,198,233,0.3)' }}>
+                            className="text-xs px-2 py-0.5 rounded-lg font-semibold disabled:opacity-40 transition-colors chip-brand">
                             Move to {ARC_LABEL} →
                           </button>
                         )}
@@ -369,8 +368,7 @@ export function GatewaySection({ onUsdcArrivedOnArc }: GatewaySectionProps) {
       <button
         disabled={!isConnected || busy || !amount || parseFloat(amount) <= 0}
         onClick={() => { void handleDeposit() }}
-        className="w-full rounded-2xl py-3.5 text-sm font-semibold transition-all hover:scale-[1.01] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40"
-        style={{ background: 'var(--accent)', color: '#0d1b2f' }}>
+        className="w-full rounded-2xl py-3.5 text-sm font-semibold transition-all hover:scale-[1.01] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40 btn-brand">
         {busy && (step === 'switching' || step === 'depositing')
           ? <span className="flex items-center justify-center gap-2"><Loader2 className="size-4 animate-spin" />
               {step === 'switching' ? 'Switching chain…' : 'Depositing…'}</span>

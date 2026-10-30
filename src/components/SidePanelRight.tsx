@@ -64,7 +64,7 @@ export function SidePanelRight() {
         }}
       >
         <div className="flex items-center justify-between">
-          <p className="text-xs font-semibold tracking-widest uppercase" style={{ color: 'var(--subtle)' }}>
+          <p className="section-label">
             Live on Arc Mainnet
           </p>
           {loading && <Loader2 className="size-3 animate-spin" style={{ color: 'var(--subtle)' }} />}
@@ -124,7 +124,7 @@ export function SidePanelRight() {
           border: '1px solid rgba(255,255,255,0.07)',
         }}
       >
-        <p className="text-xs font-semibold tracking-widest uppercase mb-1" style={{ color: 'var(--subtle)' }}>
+        <p className="section-label mb-1">
           Contracts
         </p>
         {CONTRACTS.map(({ label, addr }) => (

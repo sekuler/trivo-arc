@@ -521,8 +521,8 @@ export function SwapTab() {
           <span className="text-xs" style={{ color: 'var(--subtle)' }}>Slippage</span>
           {[25, 50, 100].map((bps) => (
             <button key={bps} onClick={() => setSlipBps(bps)}
-              className="text-xs px-2.5 py-1 rounded-lg font-semibold transition-colors"
-              style={{ background: slipBps === bps ? 'var(--accent)' : 'rgba(255,255,255,0.07)', color: slipBps === bps ? '#0d1b2f' : 'var(--muted)' }}>
+              className={`text-xs px-2.5 py-1 rounded-lg font-semibold transition-colors ${slipBps === bps ? 'chip-brand' : ''}`}
+              style={slipBps !== bps ? { background: 'rgba(255,255,255,0.07)', color: 'var(--muted)' } : undefined}>
               {(bps / 100).toFixed(2)}%
             </button>
           ))}
@@ -596,8 +596,8 @@ export function SwapTab() {
         <button
           disabled={!isConnected || busyAny || !amountIn || amtBig === 0n || noRoute || !hasQuote}
           onClick={wrongChain ? () => switchChain({ chainId: TARGET_CHAIN_ID }) : handleSwap}
-          className="w-full rounded-2xl py-3.5 text-sm font-semibold transition-all hover:scale-[1.01] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40"
-          style={{ background: 'var(--accent)', color: '#0d1b2f' }}>
+          className={`w-full rounded-2xl py-3.5 text-sm font-semibold transition-all hover:scale-[1.01] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40 ${!wrongChain ? 'btn-brand' : ''}`}
+          style={wrongChain ? { background: 'rgba(172,198,233,0.2)', color: 'var(--accent)', border: '1px solid rgba(172,198,233,0.35)' } : undefined}>
           {!isConnected ? 'Connect Wallet'
             : wrongChain ? `Switch to ${TARGET_CHAIN.name}`
             : busyAny

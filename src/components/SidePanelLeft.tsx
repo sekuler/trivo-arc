@@ -34,7 +34,7 @@ export function SidePanelLeft() {
           backdropFilter: 'blur(20px)',
         }}
       >
-        <p className="text-xs font-semibold tracking-widest uppercase" style={{ color: 'var(--subtle)' }}>
+        <p className="section-label">
           How Trivo works
         </p>
 
