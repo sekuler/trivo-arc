@@ -605,7 +605,9 @@ function OrdersSection({
   try { orderPriceRaw = orderPrice ? parseUnits(orderPrice, 6) : 0n } catch { orderPriceRaw = 0n }
 
   const totalLocked = orders.reduce((acc, o) => acc + BigInt(o.usdcAmount), 0n)
-  const feeHeadroom = 20_000_000n // 20 USDC headroom for Kitchen fees
+  // Kitchen fee headroom: each cook may cost up to its signed maxExecutionFee (2x the 0.01 USDC fee).
+  // USDC on Arc is the native gas token, so the Pot pays it from the same USDC balance (6-dec here).
+  const feeHeadroom = BigInt(orders.length + 1) * 20_000n // 0.02 USDC per order
   const potLow = potUsdc < totalLocked + orderAmtRaw + feeHeadroom
 
   const canSign = ordersState === 'idle' && orders.length < 3
