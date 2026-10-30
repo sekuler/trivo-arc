@@ -1,6 +1,7 @@
 {
   "rewrites": [
-    { "source": "/api/rpc", "destination": "/api/rpc" },
-    { "source": "/(.*)",    "destination": "/index.html" }
+    { "source": "/api/rpc",    "destination": "/api/rpc" },
+    { "source": "/api/orders", "destination": "/api/orders" },
+    { "source": "/(.*)",       "destination": "/index.html" }
   ]
 }

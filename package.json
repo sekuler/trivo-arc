@@ -26,6 +26,7 @@
     "@eco-incorp/sauce": "^1.0.0",
     "@openzeppelin/contracts": "5.1.0",
     "@tanstack/react-query": "^5.62.7",
+    "@upstash/redis": "^1.40.0",
     "@web3icons/react": "^4.0.0",
     "clsx": "^2.1.1",
     "connectkit": "^1.9.2",
